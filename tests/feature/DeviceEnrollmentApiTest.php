@@ -15,6 +15,12 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
 
     protected $namespace = 'App';
 
+    protected function tearDown(): void
+    {
+        config(Player::class)->enablePairingCode = false;
+        parent::tearDown();
+    }
+
     public function testAdminEndpointsRejectMissingAdminKey(): void
     {
         $result = $this->get('/api/admin/devices');
@@ -26,6 +32,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
     public function testPlayerCanEnrollRegisterAndSendHeartbeat(): void
     {
         $config = config(Player::class);
+        $config->enablePairingCode = true;
         $this->assertNotSame('', $config->adminApiKey);
         $this->assertGreaterThanOrEqual(32, strlen($config->enrollmentPepper));
 

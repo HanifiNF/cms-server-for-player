@@ -70,11 +70,42 @@ This is a liveness endpoint and intentionally does not query PostgreSQL.
 A readiness endpoint that checks the database and realtime gateway will be
 added when those services are connected.
 
-## Player enrollment API
+## Operator authentication and device claim
 
-Admin device operations require the `X-CMS-Admin-Key` header. This temporary
-machine-to-machine key will be replaced by authenticated CMS user sessions when
-the CMS login is implemented.
+Create the first CMS accounts from the command line. A generated password is
+shown once and is never stored in plaintext:
+
+```powershell
+php spark user:create admin@example.com "CMS Administrator" admin
+php spark user:create operator@example.com "Lobby Operator" operator
+```
+
+Operator sessions are short-lived, revocable, rate-limited at login, and use
+opaque Bearer tokens whose SHA-256 digests are stored in PostgreSQL.
+
+```text
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
+```
+
+An administrator creates a pending device with `POST /api/operator/devices`.
+An authenticated operator lists permitted devices and claims one:
+
+```text
+GET  /api/operator/devices/available
+POST /api/player/claim
+```
+
+The claim binds the pending CMS device, operator, and stable Player install ID.
+It returns a long-lived device token; the operator token is not retained by the
+Player.
+
+## Pairing-code fallback
+
+Pairing-code endpoints require the `X-CMS-Admin-Key` header and are disabled by
+default with `cms.enablePairingCode = false`. They remain only as an optional
+technician fallback during development.
 
 ```text
 POST /api/admin/devices/enroll
@@ -149,6 +180,7 @@ timezone used by the operator, with `Asia/Jakarta` as the default display zone.
 composer test
 ```
 
-The test suite uses an isolated in-memory SQLite database. It verifies the
-application bootstrap, health API, admin-key protection, one-time enrollment,
-player registration, token authentication, heartbeat, and device listing.
+The test suite uses an isolated in-memory SQLite database. It verifies health,
+operator login/logout, roles, device assignment and claim, separation of
+operator/device tokens, optional one-time pairing, heartbeat, revoke, and
+device listing.

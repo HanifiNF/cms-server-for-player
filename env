@@ -50,6 +50,10 @@ cms.adminApiKey =
 cms.enrollmentPepper =
 cms.enrollmentTtlMinutes = 15
 cms.offlineAfterSeconds = 30
+cms.enablePairingCode = false
+
+auth.operatorSessionMinutes = 30
+auth.loginAttemptsPerMinute = 5
 
 # If you use MySQLi as tests, first update the values of Config\Database::$tests.
 # database.tests.hostname = localhost

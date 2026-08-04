@@ -3,6 +3,7 @@
 namespace App\Libraries;
 
 use App\Entities\Device;
+use App\Entities\User;
 use App\Models\DeviceModel;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
@@ -56,6 +57,78 @@ class DeviceEnrollmentService
             'enrollment_code' => $code,
             'expires_at'      => $expiresAt->format(DATE_ATOM),
         ];
+    }
+
+    public function createAssignableDevice(string $name, string $timezone, ?string $location, ?int $assignedUserId): Device
+    {
+        $id = $this->devices->insert([
+            'public_id'        => $this->uuidV4(),
+            'name'             => $name,
+            'status'           => 'pending',
+            'timezone'         => $timezone,
+            'location'         => $location,
+            'assigned_user_id' => $assignedUserId,
+        ], true);
+        if ($id === false) {
+            throw new RuntimeException('The device could not be created.');
+        }
+
+        /** @var Device $device */
+        $device = $this->devices->find($id);
+        return $device;
+    }
+
+    /** @return array{device: Device, token: string} */
+    public function claim(User $operator, string $publicId, string $fingerprint, array $metadata, ?string $ipAddress): array
+    {
+        /** @var Device|null $device */
+        $device = $this->devices->where('public_id', $publicId)->where('status', 'pending')->first();
+        if ($device === null) {
+            throw new EnrollmentException('device_not_available', 'The selected device is no longer available.', 409);
+        }
+        if ($operator->role !== 'admin' && $device->assigned_user_id !== null && (int) $device->assigned_user_id !== (int) $operator->id) {
+            throw new EnrollmentException('device_not_assigned', 'This device is assigned to another operator.', 403);
+        }
+
+        $fingerprintHash = hash('sha256', $fingerprint);
+        $existing = $this->devices
+            ->where('fingerprint_hash', $fingerprintHash)
+            ->where('status', 'active')
+            ->first();
+        if ($existing !== null) {
+            throw new EnrollmentException('device_already_registered', 'This player installation is already registered.', 409);
+        }
+
+        $now = $this->now();
+        $token = $this->base64Url(random_bytes(32));
+        $this->db->transStart();
+        $updated = $this->devices
+            ->where('id', $device->id)
+            ->where('status', 'pending')
+            ->set([
+                'device_key_hash'    => hash('sha256', $token),
+                'fingerprint_hash'   => $fingerprintHash,
+                'status'             => 'active',
+                'claimed_by'         => $operator->id,
+                'claimed_at'         => $this->databaseTime($now),
+                'registered_at'      => $this->databaseTime($now),
+                'last_seen_at'       => $this->databaseTime($now),
+                'token_last_used_at' => $this->databaseTime($now),
+                'app_version'        => $metadata['app_version'] ?? null,
+                'platform'           => $metadata['platform'] ?? null,
+                'timezone'           => $metadata['timezone'] ?? $device->timezone,
+                'ip_address'         => $ipAddress,
+            ])
+            ->update();
+        $affectedRows = $this->db->affectedRows();
+        $this->db->transComplete();
+        if (! $updated || $affectedRows !== 1 || ! $this->db->transStatus()) {
+            throw new RuntimeException('The device claim could not be completed.');
+        }
+
+        /** @var Device $claimed */
+        $claimed = $this->devices->find($device->id);
+        return ['device' => $claimed, 'token' => $token];
     }
 
     /** @return array{device: Device, token: string} */

@@ -9,11 +9,15 @@ use App\Models\DeviceModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Throwable;
+use Config\Player;
 
 class DeviceController extends BaseController
 {
     public function enroll(): ResponseInterface
     {
+        if (! config(Player::class)->enablePairingCode) {
+            return $this->response->setStatusCode(403)->setJSON(['error' => ['code' => 'pairing_code_disabled', 'message' => 'Pairing-code enrollment is disabled.']]);
+        }
         $input = $this->request->getJSON(true) ?? [];
         $name = trim((string) ($input['name'] ?? ''));
         $timezone = trim((string) ($input['timezone'] ?? 'Asia/Jakarta'));

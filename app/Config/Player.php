@@ -14,6 +14,8 @@ class Player extends BaseConfig
 
     public int $offlineAfterSeconds = 30;
 
+    public bool $enablePairingCode = false;
+
     public function __construct()
     {
         parent::__construct();
@@ -22,5 +24,6 @@ class Player extends BaseConfig
         $this->enrollmentPepper = (string) env('cms.enrollmentPepper', '');
         $this->enrollmentTtlMinutes = max(1, (int) env('cms.enrollmentTtlMinutes', 15));
         $this->offlineAfterSeconds = max(5, (int) env('cms.offlineAfterSeconds', 30));
+        $this->enablePairingCode = filter_var(env('cms.enablePairingCode', false), FILTER_VALIDATE_BOOL);
     }
 }
