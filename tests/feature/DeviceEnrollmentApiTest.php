@@ -87,5 +87,20 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
         $this->assertSame('Test Lobby Player', $deviceList[0]['name']);
         $this->assertSame('online', $deviceList[0]['connection_status']);
         $this->assertSame('1.1.1', $deviceList[0]['app_version']);
+
+        $unregister = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $registrationData['token'],
+        ])->withBodyFormat('json')->post('/api/player/unregister', []);
+        $unregister->assertStatus(200);
+        $unregister->assertJSONFragment(['data' => [
+            'device_id' => $registrationData['device_id'],
+            'status'    => 'revoked',
+        ]]);
+
+        $revokedToken = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $registrationData['token'],
+        ])->withBodyFormat('json')->post('/api/player/heartbeat', []);
+        $revokedToken->assertStatus(401);
+        $revokedToken->assertJSONFragment(['error' => ['code' => 'invalid_player_token']]);
     }
 }

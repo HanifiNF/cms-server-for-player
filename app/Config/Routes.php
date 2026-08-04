@@ -17,4 +17,5 @@ $routes->group('api', static function (RouteCollection $routes): void {
 
     $routes->post('player/register', 'Api\Player\RegistrationController::register');
     $routes->post('player/heartbeat', 'Api\Player\HeartbeatController::create');
+    $routes->post('player/unregister', 'Api\Player\RegistrationController::unregister');
 });

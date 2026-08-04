@@ -116,6 +116,13 @@ POST /api/player/heartbeat
 Authorization: Bearer {playerToken}
 ```
 
+Before clearing its local credentials, a player revokes its pairing with:
+
+```text
+POST /api/player/unregister
+Authorization: Bearer {playerToken}
+```
+
 Only token digests and enrollment-code digests are stored in PostgreSQL.
 
 ## Database foundation

@@ -170,6 +170,20 @@ class DeviceEnrollmentService
         return $updated;
     }
 
+    public function unregister(Device $device): void
+    {
+        $updated = $this->devices->update($device->id, [
+            'device_key_hash'    => null,
+            'fingerprint_hash'   => null,
+            'status'             => 'revoked',
+            'token_last_used_at' => $this->databaseTime($this->now()),
+        ]);
+
+        if (! $updated) {
+            throw new RuntimeException('The player registration could not be revoked.');
+        }
+    }
+
     public function connectionStatus(Device $device): string
     {
         if ($device->status !== 'active' || $device->last_seen_at === null) {
