@@ -3,6 +3,7 @@
 namespace Config;
 
 use App\Filters\AdminApiKeyFilter;
+use App\Filters\WebAdminFilter;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -36,6 +37,7 @@ class Filters extends BaseFilters
         'pagecache'     => PageCache::class,
         'performance'   => PerformanceMetrics::class,
         'admin-api'     => AdminApiKeyFilter::class,
+        'web-admin'     => WebAdminFilter::class,
     ];
 
     /**
@@ -75,7 +77,7 @@ class Filters extends BaseFilters
     public array $globals = [
         'before' => [
             // 'honeypot',
-            // 'csrf',
+            'csrf' => ['except' => ['api/*']],
             // 'invalidchars',
         ],
         'after' => [

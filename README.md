@@ -72,8 +72,19 @@ added when those services are connected.
 
 ## Operator authentication and device claim
 
-Create the first CMS accounts from the command line. A generated password is
-shown once and is never stored in plaintext:
+Open `http://localhost:8080`. When no administrator exists, the CMS redirects
+to `/setup` to create the first administrator. That one-time route becomes
+unavailable as soon as an administrator record exists.
+
+After signing in, use the control panel to:
+
+- create, edit, activate, and deactivate operator accounts;
+- reset passwords and revoke the account's active API sessions;
+- create pending Player records and assign them to an operator;
+- monitor pending, online, and offline Player status.
+
+The command below remains available as a recovery or automation fallback. Its
+generated password is shown once and is never stored in plaintext:
 
 ```powershell
 php spark user:create admin@example.com "CMS Administrator" admin
@@ -147,12 +158,10 @@ POST /api/player/heartbeat
 Authorization: Bearer {playerToken}
 ```
 
-Before clearing its local credentials, a player revokes its pairing with:
-
-```text
-POST /api/player/unregister
-Authorization: Bearer {playerToken}
-```
+Pairing revocation is an administrator-only CMS action. The Player cannot
+revoke itself. Once revoked, its next heartbeat is rejected and it returns to
+the pairing screen. Revoked Player records can then be permanently deleted
+from the CMS control panel.
 
 Only token digests and enrollment-code digests are stored in PostgreSQL.
 

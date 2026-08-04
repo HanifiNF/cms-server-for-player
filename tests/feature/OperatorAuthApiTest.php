@@ -73,6 +73,9 @@ final class OperatorAuthApiTest extends CIUnitTestCase
         $claimed->assertStatus(201);
         $claimData = json_decode($claimed->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
         $this->assertNotSame('', $claimData['token']);
+        $this->assertSame('Assigned Lobby Player', $claimData['device_name']);
+        $this->assertSame('Lobby', $claimData['device_location']);
+        $this->assertSame('Asia/Jakarta', $claimData['device_timezone']);
 
         $heartbeat = $this->withHeaders(['Authorization' => 'Bearer ' . $claimData['token']])
             ->withBodyFormat('json')->post('/api/player/heartbeat', []);

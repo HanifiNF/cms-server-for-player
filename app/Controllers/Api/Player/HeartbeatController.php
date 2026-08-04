@@ -50,6 +50,9 @@ class HeartbeatController extends BaseController
         return $this->response->setJSON([
             'data' => [
                 'device_id'         => $device->public_id,
+                'device_name'       => $device->name,
+                'device_location'   => $device->location,
+                'device_timezone'   => $device->timezone,
                 'connection_status' => 'online',
                 'server_time'       => gmdate(DATE_ATOM),
                 'inventory_revision'=> $device->inventory_revision,

@@ -243,7 +243,7 @@ class DeviceEnrollmentService
         return $updated;
     }
 
-    public function unregister(Device $device): void
+    public function revoke(Device $device): void
     {
         $updated = $this->devices->update($device->id, [
             'device_key_hash'    => null,

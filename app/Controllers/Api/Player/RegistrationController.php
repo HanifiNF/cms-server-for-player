@@ -67,6 +67,8 @@ class RegistrationController extends BaseController
             'data' => [
                 'device_id'        => $result['device']->public_id,
                 'device_name'      => $result['device']->name,
+                'device_location'  => $result['device']->location,
+                'device_timezone'  => $result['device']->timezone,
                 'token'            => $result['token'],
                 'token_type'       => 'Bearer',
                 'heartbeat_interval_seconds' => 10,
@@ -104,32 +106,9 @@ class RegistrationController extends BaseController
 
         return $this->response->setHeader('Cache-Control', 'no-store')->setStatusCode(201)->setJSON(['data' => [
             'device_id' => $result['device']->public_id, 'device_name' => $result['device']->name,
+            'device_location' => $result['device']->location, 'device_timezone' => $result['device']->timezone,
             'token' => $result['token'], 'token_type' => 'Bearer', 'heartbeat_interval_seconds' => 10,
         ]]);
-    }
-
-    public function unregister(): ResponseInterface
-    {
-        $service = new DeviceEnrollmentService();
-
-        try {
-            $device = $service->authenticate($this->request->getHeaderLine('Authorization'));
-            $service->unregister($device);
-        } catch (EnrollmentException $exception) {
-            return $this->response->setStatusCode($exception->httpStatus)->setJSON([
-                'error' => ['code' => $exception->errorCode, 'message' => $exception->getMessage()],
-            ]);
-        } catch (Throwable $exception) {
-            log_message('error', 'Player unregister failed: {message}', ['message' => $exception->getMessage()]);
-
-            return $this->response->setStatusCode(500)->setJSON([
-                'error' => ['code' => 'unregister_failed', 'message' => 'The player registration could not be revoked.'],
-            ]);
-        }
-
-        return $this->response->setHeader('Cache-Control', 'no-store')->setJSON([
-            'data' => ['device_id' => $device->public_id, 'status' => 'revoked'],
-        ]);
     }
 
     /** @param array<string, string> $errors */

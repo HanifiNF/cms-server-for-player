@@ -5,7 +5,26 @@ use CodeIgniter\Router\RouteCollection;
 /**
  * @var RouteCollection $routes
  */
-$routes->get('/', 'Home::index');
+$routes->get('/', 'Web\EntryController::index');
+$routes->get('setup', 'Web\SetupController::index');
+$routes->post('setup', 'Web\SetupController::create');
+$routes->get('login', 'Web\AuthController::index');
+$routes->post('login', 'Web\AuthController::login');
+$routes->post('logout', 'Web\AuthController::logout', ['filter' => 'web-admin']);
+
+$routes->group('control', ['filter' => 'web-admin'], static function (RouteCollection $routes): void {
+    $routes->get('/', 'Web\DashboardController::index');
+    $routes->get('operators', 'Web\OperatorController::index');
+    $routes->post('operators', 'Web\OperatorController::create');
+    $routes->post('operators/(:num)/update', 'Web\OperatorController::update/$1');
+    $routes->post('operators/(:num)/status', 'Web\OperatorController::status/$1');
+    $routes->post('operators/(:num)/password', 'Web\OperatorController::password/$1');
+    $routes->get('devices', 'Web\DeviceController::index');
+    $routes->post('devices', 'Web\DeviceController::create');
+    $routes->post('devices/(:segment)/assignment', 'Web\DeviceController::assignment/$1');
+    $routes->post('devices/(:segment)/revoke', 'Web\DeviceController::revoke/$1');
+    $routes->post('devices/(:segment)/delete', 'Web\DeviceController::delete/$1');
+});
 $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('health', 'Api\HealthController::index');
     $routes->post('auth/login', 'Api\AuthController::login');
@@ -24,5 +43,4 @@ $routes->group('api', static function (RouteCollection $routes): void {
     $routes->post('player/register', 'Api\Player\RegistrationController::register');
     $routes->post('player/claim', 'Api\Player\RegistrationController::claim');
     $routes->post('player/heartbeat', 'Api\Player\HeartbeatController::create');
-    $routes->post('player/unregister', 'Api\Player\RegistrationController::unregister');
 });

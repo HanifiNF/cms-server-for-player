@@ -1,0 +1,26 @@
+.badge.revoked {
+  background: #fbe3e2;
+  color: var(--red-dark);
+}
+
+.lifecycle-form {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.device-card.revoked {
+  background: #fbf7f5;
+  border-color: #ead6d2;
+}
+
+.device-card.revoked .device-icon {
+  background: #fbe3e2;
+  color: var(--red-dark);
+}
+
+.revoked-section > .muted {
+  margin: -8px 0 18px;
+}
