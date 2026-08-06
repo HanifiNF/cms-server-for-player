@@ -226,6 +226,27 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             $forbidden->assertStatus(404);
             $download = $this->withHeaders(['Authorization' => 'Bearer ' . $assignedToken])->get('/api/player/assets/' . $publicId . '/download');
             $download->assertStatus(200);
+            $etag = '"' . hash('sha256', $content) . '"';
+            $rangeDownload = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $assignedToken,
+                'Range' => 'bytes=2-7', 'If-Range' => $etag,
+            ])->get('/api/player/assets/' . $publicId . '/download');
+            $rangeDownload->assertStatus(206);
+            $rangeDownload->assertHeader('Accept-Ranges', 'bytes');
+            $rangeDownload->assertHeader('Content-Range', 'bytes 2-7/' . strlen($content));
+            $rangeDownload->assertHeader('Content-Length', '6');
+            $rangeDownload->assertHeader('ETag', $etag);
+            $invalidRange = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $assignedToken, 'Range' => 'bytes=999-',
+            ])->get('/api/player/assets/' . $publicId . '/download');
+            $invalidRange->assertStatus(416);
+            $invalidRange->assertHeader('Content-Range', 'bytes */' . strlen($content));
+            $changedAsset = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $assignedToken,
+                'Range' => 'bytes=2-', 'If-Range' => '"different-etag"',
+            ])->get('/api/player/assets/' . $publicId . '/download');
+            $changedAsset->assertStatus(200);
+            $changedAsset->assertHeaderMissing('Content-Range');
 
             (new AssetModel())->update($assetId, ['duration_ms' => 0]);
             $durationSync = $this->withHeaders(['Authorization' => 'Bearer ' . $assignedToken])

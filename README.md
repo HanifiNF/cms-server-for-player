@@ -64,6 +64,22 @@ php spark serve
 
 The development server listens at `http://localhost:8080` by default.
 
+### Run through Laragon Apache (recommended on Windows)
+
+The PHP development server handles only one long-running media response at a
+time on Windows. For concurrent downloads, login, heartbeat, and CMS requests,
+install `deploy/apache/wir-player-cms.conf` into Laragon's
+`C:\laragon\etc\apache2\sites-enabled` directory and restart Apache. The
+provided development virtual host serves `public/` at:
+
+```text
+http://localhost:8080
+```
+
+Do not run `php spark serve` on port 8080 at the same time. For another device
+on the same LAN, use the CMS computer's LAN IP instead of `localhost` and allow
+TCP port 8080 through Windows Firewall.
+
 ## Health endpoint
 
 ```text
@@ -203,6 +219,13 @@ Player that has the specific asset assignment. Uploaded files are stored below
 `writable/uploads/assets`, outside the public web root. Set PHP
 `upload_max_filesize` and `post_max_size` above the largest film size before
 uploading production media.
+
+Authenticated media downloads support single HTTP byte ranges over HTTP or
+HTTPS. The endpoint returns `Accept-Ranges: bytes`, strong SHA-256 `ETag`
+validators, `206 Partial Content` with `Content-Range`, and `416` for invalid
+ranges. Files are streamed in 1 MB chunks instead of being loaded into PHP
+memory in full. This allows a Player to continue a saved `.part` download after
+a restart or power interruption.
 
 Film duration is detected automatically during upload with `ffprobe`; operators
 do not enter it manually. Configure `media.ffprobePath` in `.env` when ffprobe

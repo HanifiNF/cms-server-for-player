@@ -8,6 +8,7 @@ use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Models\AssetModel;
 use App\Models\DeviceAssetModel;
+use App\HTTP\RangeFileResponse;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeImmutable;
 use Throwable;
@@ -163,7 +164,45 @@ class AssetController extends BaseController
             || ! is_file($filePath)) {
             return $this->assetNotFound();
         }
-        return $this->response->download($filePath, null, true)->setFileName($asset->filename);
+        $size = filesize($filePath);
+        if ($size === false || $size <= 0) return $this->assetNotFound();
+        $etag = '"' . strtolower((string) $asset->sha256) . '"';
+        $rangeHeader = trim($this->request->getHeaderLine('Range'));
+        $ifRange = trim($this->request->getHeaderLine('If-Range'));
+        if ($rangeHeader !== '' && $ifRange !== '' && ! hash_equals($etag, $ifRange)) $rangeHeader = '';
+        $start = 0;
+        $end = $size - 1;
+        $partial = false;
+        if ($rangeHeader !== '') {
+            $range = $this->parseRange($rangeHeader, $size);
+            if ($range === null) {
+                return $this->response->setStatusCode(416)
+                    ->setHeader('Accept-Ranges', 'bytes')->setHeader('Content-Range', "bytes */{$size}")
+                    ->setHeader('ETag', $etag)->setBody('');
+            }
+            [$start, $end] = $range;
+            $partial = true;
+        }
+        return new RangeFileResponse(
+            $filePath, $start, $end, (string) $asset->filename,
+            (string) ($asset->mime_type ?: 'application/octet-stream'), $etag, $partial,
+        );
+    }
+
+    /** @return array{int, int}|null */
+    private function parseRange(string $header, int $size): ?array
+    {
+        if ($size <= 0 || str_contains($header, ',') || ! preg_match('/^bytes=(\d*)-(\d*)$/', $header, $matches)) return null;
+        if ($matches[1] === '' && $matches[2] === '') return null;
+        if ($matches[1] === '') {
+            $suffix = (int) $matches[2];
+            if ($suffix <= 0) return null;
+            return [max(0, $size - $suffix), $size - 1];
+        }
+        $start = (int) $matches[1];
+        if ($start >= $size) return null;
+        $end = $matches[2] === '' ? $size - 1 : min((int) $matches[2], $size - 1);
+        return $end >= $start ? [$start, $end] : null;
     }
 
     /**
