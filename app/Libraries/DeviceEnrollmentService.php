@@ -86,7 +86,10 @@ class DeviceEnrollmentService
         if ($device === null) {
             throw new EnrollmentException('device_not_available', 'The selected device is no longer available.', 409);
         }
-        if ($operator->role !== 'admin' && $device->assigned_user_id !== null && (int) $device->assigned_user_id !== (int) $operator->id) {
+        if ($device->assigned_user_id === null) {
+            throw new EnrollmentException('device_unassigned', 'This device must be assigned by a CMS administrator before pairing.', 403);
+        }
+        if ((int) $device->assigned_user_id !== (int) $operator->id) {
             throw new EnrollmentException('device_not_assigned', 'This device is assigned to another operator.', 403);
         }
 

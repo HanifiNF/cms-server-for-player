@@ -79,7 +79,7 @@ class RegistrationController extends BaseController
     public function claim(): ResponseInterface
     {
         try {
-            $auth = (new OperatorAuthService())->authenticate($this->request->getHeaderLine('Authorization'));
+            $auth = (new OperatorAuthService())->authenticate($this->request->getHeaderLine('Authorization'), ['operator']);
         } catch (OperatorAuthException $exception) {
             return $this->response->setStatusCode($exception->httpStatus)->setJSON(['error' => ['code' => $exception->errorCode, 'message' => $exception->getMessage()]]);
         }

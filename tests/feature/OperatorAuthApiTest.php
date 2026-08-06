@@ -26,8 +26,14 @@ final class OperatorAuthApiTest extends CIUnitTestCase
             'password_hash' => password_hash('Operator-Test-Password-2026!', PASSWORD_ARGON2ID),
             'role' => 'operator', 'status' => 'active',
         ], true);
+        $otherOperatorId = $users->insert([
+            'email' => 'other-operator@example.com', 'name' => 'Other Operator',
+            'password_hash' => password_hash('Other-Operator-Password-2026!', PASSWORD_ARGON2ID),
+            'role' => 'operator', 'status' => 'active',
+        ], true);
         $this->assertIsInt($adminId);
         $this->assertIsInt($operatorId);
+        $this->assertIsInt($otherOperatorId);
 
         $invalidLogin = $this->withBodyFormat('json')->post('/api/auth/login', [
             'email' => 'operator-test@example.com', 'password' => 'wrong-password',
@@ -50,6 +56,7 @@ final class OperatorAuthApiTest extends CIUnitTestCase
         $operatorCreate->assertJSONFragment(['error' => ['code' => 'insufficient_role']]);
 
         $adminLogin = $this->login('admin-test@example.com', 'Admin-Test-Password-2026!');
+        $otherOperatorLogin = $this->login('other-operator@example.com', 'Other-Operator-Password-2026!');
         $created = $this->withHeaders(['Authorization' => 'Bearer ' . $adminLogin['token']])
             ->withBodyFormat('json')->post('/api/operator/devices', [
                 'name' => 'Assigned Lobby Player', 'location' => 'Lobby',
@@ -58,12 +65,41 @@ final class OperatorAuthApiTest extends CIUnitTestCase
         $created->assertStatus(201);
         $device = json_decode($created->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
 
+        $unassignedResponse = $this->withHeaders(['Authorization' => 'Bearer ' . $adminLogin['token']])
+            ->withBodyFormat('json')->post('/api/operator/devices', [
+                'name' => 'Unassigned Player', 'timezone' => 'Asia/Jakarta',
+            ]);
+        $unassignedResponse->assertStatus(201);
+        $unassignedDevice = json_decode($unassignedResponse->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+
+        $otherResponse = $this->withHeaders(['Authorization' => 'Bearer ' . $adminLogin['token']])
+            ->withBodyFormat('json')->post('/api/operator/devices', [
+                'name' => 'Other Operator Player', 'timezone' => 'Asia/Jakarta',
+                'assigned_user_id' => $otherOperatorId,
+            ]);
+        $otherResponse->assertStatus(201);
+        $otherDevice = json_decode($otherResponse->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+
         $available = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
             ->get('/api/operator/devices/available');
         $available->assertStatus(200);
         $availableData = json_decode($available->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
         $this->assertCount(1, $availableData);
         $this->assertSame($device['id'], $availableData[0]['id']);
+
+        $unassignedClaim = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
+            ->withBodyFormat('json')->post('/api/player/claim', [
+                'device_id' => $unassignedDevice['id'], 'device_fingerprint' => 'unassigned-installation-id',
+            ]);
+        $unassignedClaim->assertStatus(403);
+        $unassignedClaim->assertJSONFragment(['error' => ['code' => 'device_unassigned']]);
+
+        $otherClaim = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
+            ->withBodyFormat('json')->post('/api/player/claim', [
+                'device_id' => $otherDevice['id'], 'device_fingerprint' => 'other-operator-installation-id',
+            ]);
+        $otherClaim->assertStatus(403);
+        $otherClaim->assertJSONFragment(['error' => ['code' => 'device_not_assigned']]);
 
         $claimed = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
             ->withBodyFormat('json')->post('/api/player/claim', [
@@ -76,6 +112,21 @@ final class OperatorAuthApiTest extends CIUnitTestCase
         $this->assertSame('Assigned Lobby Player', $claimData['device_name']);
         $this->assertSame('Lobby', $claimData['device_location']);
         $this->assertSame('Asia/Jakarta', $claimData['device_timezone']);
+
+        $controlAccess = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
+            ->withBodyFormat('json')->post('/api/operator/devices/' . $device['id'] . '/control-access', []);
+        $controlAccess->assertStatus(200);
+        $controlAccess->assertJSONFragment(['data' => ['authorized' => true, 'device_id' => $device['id']]]);
+
+        $otherControlAccess = $this->withHeaders(['Authorization' => 'Bearer ' . $otherOperatorLogin['token']])
+            ->withBodyFormat('json')->post('/api/operator/devices/' . $device['id'] . '/control-access', []);
+        $otherControlAccess->assertStatus(403);
+        $otherControlAccess->assertJSONFragment(['error' => ['code' => 'device_control_forbidden']]);
+
+        $adminControlAccess = $this->withHeaders(['Authorization' => 'Bearer ' . $adminLogin['token']])
+            ->withBodyFormat('json')->post('/api/operator/devices/' . $device['id'] . '/control-access', []);
+        $adminControlAccess->assertStatus(403);
+        $adminControlAccess->assertJSONFragment(['error' => ['code' => 'insufficient_role']]);
 
         $heartbeat = $this->withHeaders(['Authorization' => 'Bearer ' . $claimData['token']])
             ->withBodyFormat('json')->post('/api/player/heartbeat', []);

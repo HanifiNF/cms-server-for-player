@@ -32,6 +32,7 @@ $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('auth/me', 'Api\AuthController::me');
 
     $routes->get('operator/devices/available', 'Api\Operator\DeviceController::available');
+    $routes->post('operator/devices/(:segment)/control-access', 'Api\Operator\DeviceController::controlAccess/$1');
     $routes->post('operator/devices', 'Api\Operator\DeviceController::create');
 
     $routes->group('admin', ['filter' => 'admin-api'], static function (RouteCollection $routes): void {

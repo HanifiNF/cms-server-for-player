@@ -66,7 +66,7 @@ class DeviceController extends BaseController
         $model = new DeviceModel();
         $device = $model->where('public_id', $publicId)->first();
         if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
-        if ($device->status !== 'pending') return redirect()->to('/control/devices')->with('error', 'Only pending Players can be reassigned.');
+        if (! in_array($device->status, ['pending', 'active'], true)) return redirect()->to('/control/devices')->with('error', 'Revoked Players cannot be reassigned.');
         $assignedId = (int) $this->request->getPost('assigned_user_id');
         $assignedId = $assignedId > 0 ? $assignedId : null;
         if ($assignedId !== null && ! $this->validOperator($assignedId)) return redirect()->to('/control/devices')->with('error', 'Choose an active operator.');
