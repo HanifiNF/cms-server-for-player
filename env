@@ -55,6 +55,10 @@ cms.enablePairingCode = false
 auth.operatorSessionMinutes = 30
 auth.loginAttemptsPerMinute = 5
 
+# Optional explicit ffprobe executable used for automatic film duration detection.
+# Windows example: media.ffprobePath = 'C:\\Users\\YourName\\scoop\\shims\\ffprobe.exe'
+# media.ffprobePath =
+
 # If you use MySQLi as tests, first update the values of Config\Database::$tests.
 # database.tests.hostname = localhost
 # database.tests.database = ci4_test

@@ -15,6 +15,7 @@
       <a class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>" href="<?= site_url('control') ?>">⌂ <span>Dashboard</span></a>
       <a class="<?= ($active ?? '') === 'operators' ? 'active' : '' ?>" href="<?= site_url('control/operators') ?>">◎ <span>Operators</span></a>
       <a class="<?= ($active ?? '') === 'devices' ? 'active' : '' ?>" href="<?= site_url('control/devices') ?>">▣ <span>Players</span></a>
+      <a class="<?= ($active ?? '') === 'assets' ? 'active' : '' ?>" href="<?= site_url('control/assets') ?>">◆ <span>Assets</span></a>
     </nav>
     <div class="sidebar-footer">
       <div class="signed-in"><strong><?= esc($admin->name) ?></strong><small><?= esc($admin->email) ?></small></div>

@@ -5,6 +5,7 @@ namespace App\Controllers\Web;
 use App\Controllers\BaseController;
 use App\Libraries\DeviceEnrollmentService;
 use App\Models\DeviceModel;
+use App\Models\DeviceAssetModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
 use Config\Player;
@@ -21,13 +22,22 @@ class DeviceController extends BaseController
         foreach ((new UserModel())->findAll() as $user) $userNames[(int) $user->id] = $user->name;
         $offlineAfter = config(Player::class)->offlineAfterSeconds;
         $now = time();
-        $allDevices = array_map(static function ($device) use ($userNames, $offlineAfter, $now): array {
+        $assetCounts = [];
+        foreach ((new DeviceAssetModel())->select('device_id, COUNT(*) AS asset_count')->groupBy('device_id')->findAll() as $row) {
+            $assetCounts[(int) $row->device_id] = (int) $row->asset_count;
+        }
+        $allDevices = array_map(static function ($device) use ($userNames, $offlineAfter, $now, $assetCounts): array {
             $connection = $device->status;
             if ($device->status === 'active') {
                 $lastSeen = $device->last_seen_at ? $device->last_seen_at->getTimestamp() : 0;
                 $connection = $lastSeen > 0 && ($now - $lastSeen) <= $offlineAfter ? 'online' : 'offline';
             }
-            return ['entity' => $device, 'connection' => $connection, 'assignedName' => $userNames[(int) $device->assigned_user_id] ?? 'Unassigned'];
+            return [
+                'entity' => $device,
+                'connection' => $connection,
+                'assignedName' => $userNames[(int) $device->assigned_user_id] ?? 'Unassigned',
+                'assetCount' => $assetCounts[(int) $device->id] ?? 0,
+            ];
         }, (new DeviceModel())->orderBy('created_at', 'DESC')->findAll());
 
         return view('web/devices', [
@@ -35,6 +45,48 @@ class DeviceController extends BaseController
             'devices' => array_values(array_filter($allDevices, static fn (array $item): bool => $item['entity']->status !== 'revoked')),
             'revokedDevices' => array_values(array_filter($allDevices, static fn (array $item): bool => $item['entity']->status === 'revoked')),
             'operators' => $users,
+        ]);
+    }
+
+    public function assets(string $publicId): string|RedirectResponse
+    {
+        $device = (new DeviceModel())->where('public_id', $publicId)->first();
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
+
+        $query = mb_strtolower(trim((string) $this->request->getGet('q')));
+        $status = trim((string) $this->request->getGet('status'));
+        $source = trim((string) $this->request->getGet('source'));
+        if (! in_array($status, ['', 'ready', 'missing', 'corrupt', 'unreadable'], true)) $status = '';
+        if (! in_array($source, ['', 'local', 'managed'], true)) $source = '';
+
+        $allAssets = (new DeviceAssetModel())->where('device_id', $device->id)->findAll();
+        $summary = ['total' => 0, 'ready' => 0, 'missing' => 0, 'problems' => 0];
+        $lastSyncedAt = null;
+        foreach ($allAssets as $asset) {
+            $summary['total']++;
+            if ($asset->status === 'ready') $summary['ready']++;
+            else $summary['problems']++;
+            if ($asset->status === 'missing') $summary['missing']++;
+            if ($asset->last_reported_at !== null && ($lastSyncedAt === null || $asset->last_reported_at->getTimestamp() > $lastSyncedAt->getTimestamp())) {
+                $lastSyncedAt = $asset->last_reported_at;
+            }
+        }
+
+        $assets = array_values(array_filter($allAssets, static function ($asset) use ($query, $status, $source): bool {
+            if ($status !== '' && $asset->status !== $status) return false;
+            if ($source !== '' && $asset->source !== $source) return false;
+            if ($query === '') return true;
+            $haystack = mb_strtolower(implode(' ', [$asset->title, $asset->filename, $asset->relative_path, $asset->media_key]));
+            return str_contains($haystack, $query);
+        }));
+        usort($assets, static fn ($left, $right): int => strcasecmp($left->title, $right->title) ?: strcasecmp($left->relative_path ?? '', $right->relative_path ?? ''));
+
+        return view('web/device_assets', [
+            'title' => 'Player Assets', 'active' => 'devices', 'admin' => $this->admin(),
+            'device' => $device, 'assets' => array_slice($assets, 0, 1000),
+            'summary' => $summary, 'lastSyncedAt' => $lastSyncedAt,
+            'filters' => ['q' => (string) $this->request->getGet('q'), 'status' => $status, 'source' => $source],
+            'resultCount' => count($assets),
         ]);
     }
 

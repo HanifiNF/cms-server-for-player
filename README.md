@@ -18,6 +18,21 @@ for users, devices, assets, and schedules.
 The local workstation currently uses PHP 8.5, Composer 2.10, and PostgreSQL 18.
 Both `pgsql` and `pdo_pgsql` are enabled.
 
+## Player asset inventory
+
+An active Player synchronizes its Media Folder and managed downloads through:
+
+```text
+POST /api/player/assets/sync
+Authorization: Bearer <device-token>
+```
+
+The endpoint accepts an authoritative snapshot of at most 2,000 items. It
+upserts records by `(device_id, media_key)`, marks omitted records as
+`missing`, and increments `devices.inventory_revision` in one transaction.
+Absolute paths and unsafe relative paths are rejected. In the admin control
+panel, open **Players → View Assets** to search and filter a Player inventory.
+
 ## Local setup
 
 From `cms-server`:
@@ -164,6 +179,58 @@ the pairing screen. Revoked Player records can then be permanently deleted
 from the CMS control panel.
 
 Only token digests and enrollment-code digests are stored in PostgreSQL.
+
+## Remote media distribution
+
+Administrators manage films from **Control Center → Assets**:
+
+1. upload a media file to the private CMS storage;
+2. assign it to one or more active Players;
+3. refresh the Player, or wait for its first heartbeat after startup;
+4. monitor the assignment status changing from `missing` to `ready`.
+
+Player-only endpoints use the long-lived device Bearer token:
+
+```text
+GET  /api/player/assets/assigned
+GET  /api/player/assets/{assetPublicId}/download
+POST /api/player/assets/sync
+```
+
+The manifest exposes relative download URLs so Players can use the LAN or
+public CMS hostname they were paired with. Downloads are allowed only for a
+Player that has the specific asset assignment. Uploaded files are stored below
+`writable/uploads/assets`, outside the public web root. Set PHP
+`upload_max_filesize` and `post_max_size` above the largest film size before
+uploading production media.
+
+Film duration is detected automatically during upload with `ffprobe`; operators
+do not enter it manually. Configure `media.ffprobePath` in `.env` when ffprobe
+is not available on the CMS process PATH. If server-side probing is unavailable,
+the asset remains marked **Detecting…** and the first assigned Player that
+downloads and verifies the file reports the duration back to the catalog.
+
+The Assets upload form submits with upload progress feedback: percentage,
+transferred bytes, current throughput, and estimated time remaining. After the
+network transfer reaches 100%, the UI switches to **Processing media…** while
+the CMS moves the file, hashes it, probes duration, and commits its database
+record. Operators can cancel only during the network-transfer phase. This is a
+single-request upload; interrupted uploads restart from zero until resumable
+chunk uploads are implemented.
+
+Asset lifecycle actions are intentionally separate:
+
+- **Unassign** removes the CMS assignment but retains the Player's verified
+  local cache.
+- **Unassign & Remove** records a pending removal. On its next startup or
+  manual refresh, the Player deletes the managed file only when VLC is not
+  using it, then acknowledges completion to the CMS.
+- **Delete Asset** permanently deletes the private CMS upload and its database
+  record. It is blocked while any Player assignment, pending removal, or
+  schedule reference exists.
+
+Because the Socket.IO gateway is not enabled yet, offline or running Players
+receive removal requests through the regular startup/manual-refresh flow.
 
 ## Database foundation
 
