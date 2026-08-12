@@ -1,0 +1,373 @@
+<?php
+
+namespace App\Libraries;
+
+use App\Entities\Device;
+use App\Models\AssetModel;
+use App\Models\DeviceAssetModel;
+use App\Models\DeviceModel;
+use App\Models\ScheduleModel;
+use CodeIgniter\Database\BaseConnection;
+use CodeIgniter\Database\RawSql;
+use Config\Database;
+use DateTimeImmutable;
+use DateTimeZone;
+use RuntimeException;
+use Throwable;
+
+class ScheduleService
+{
+    private BaseConnection $db;
+
+    public function __construct(?BaseConnection $db = null)
+    {
+        $this->db = $db ?? Database::connect();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function readyMediaByDevice(): array
+    {
+        $assetPublicIds = [];
+        foreach ((new AssetModel())->findAll() as $asset) {
+            $assetPublicIds[(int) $asset->id] = $asset->public_id;
+        }
+
+        $result = [];
+        foreach ((new DeviceModel())->where('status', 'active')->orderBy('name')->findAll() as $device) {
+            $media = [];
+            foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'ready')->orderBy('title')->findAll() as $item) {
+                $durationMs = max(0, (int) $item->duration_ms);
+                if ($durationMs <= 0 || $item->media_key === null || $item->media_key === '') continue;
+                $media[] = [
+                    'mediaKey' => $item->media_key,
+                    'assetId' => $item->asset_id !== null ? ($assetPublicIds[(int) $item->asset_id] ?? null) : null,
+                    'title' => $item->title,
+                    'filename' => $item->filename,
+                    'source' => $item->source,
+                    'durationMs' => $durationMs,
+                ];
+            }
+            $result[] = [
+                'id' => $device->public_id,
+                'name' => $device->name,
+                'location' => $device->location,
+                'timezone' => $device->timezone ?: 'Asia/Jakarta',
+                'media' => $media,
+            ];
+        }
+        return $result;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listForWeb(): array
+    {
+        $rows = $this->db->table('schedules s')
+            ->select('s.*, d.public_id AS device_public_id, d.name AS device_name, d.location AS device_location')
+            ->join('schedule_targets st', 'st.schedule_id = s.id')
+            ->join('devices d', 'd.id = st.device_id')
+            ->orderBy('s.start_at', 'DESC')->get()->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['items'] = $this->itemsForSchedule((int) $row['id']);
+            $row['display_status'] = $this->displayStatus($row);
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findForWeb(string $publicId): ?array
+    {
+        $row = $this->db->table('schedules s')
+            ->select('s.*, d.public_id AS device_public_id, d.name AS device_name, d.location AS device_location')
+            ->join('schedule_targets st', 'st.schedule_id = s.id')
+            ->join('devices d', 'd.id = st.device_id')
+            ->where('s.public_id', $publicId)->get()->getRowArray();
+        if ($row === null) return null;
+        $row['items'] = $this->itemsForSchedule((int) $row['id']);
+        return $row;
+    }
+
+    /** @param array<string, mixed> $input */
+    public function create(array $input, int $createdBy): string
+    {
+        $normalized = $this->normalize($input);
+        $publicId = $this->uuidV4();
+        $this->persist(null, $publicId, $normalized, $createdBy);
+        return $publicId;
+    }
+
+    /** @param array<string, mixed> $input */
+    public function update(string $publicId, array $input, int $createdBy): void
+    {
+        $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
+        if ($schedule === null) throw new RuntimeException('Schedule was not found.');
+        $normalized = $this->normalize($input, (int) $schedule->id);
+        $this->persist((int) $schedule->id, $publicId, $normalized, $createdBy);
+    }
+
+    public function setEnabled(string $publicId, bool $enabled): void
+    {
+        $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
+        if ($schedule === null) throw new RuntimeException('Schedule was not found.');
+        $deviceId = (int) ($this->db->table('schedule_targets')->select('device_id')->where('schedule_id', $schedule->id)->get()->getRowArray()['device_id'] ?? 0);
+        if ($enabled) {
+            $conflict = $this->db->table('schedules s')->select('s.title')
+                ->join('schedule_targets st', 'st.schedule_id = s.id')
+                ->where('st.device_id', $deviceId)->where('s.status', 'active')
+                ->where('s.id !=', $schedule->id)->where('s.start_at <', (string) $schedule->end_at)
+                ->where('s.end_at >', (string) $schedule->start_at)->get()->getRowArray();
+            if ($conflict !== null) {
+                throw new ScheduleValidationException(['status' => 'This schedule overlaps "' . $conflict['title'] . '" and cannot be enabled.']);
+            }
+        }
+        $this->db->transBegin();
+        try {
+            $this->db->table('schedules')->where('id', $schedule->id)->update([
+                'status' => $enabled ? 'active' : 'disabled',
+                'revision' => new RawSql('revision + 1'),
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+            $this->bumpDeviceRevision($deviceId);
+            $this->finishTransaction();
+        } catch (Throwable $error) {
+            $this->db->transRollback();
+            throw $error;
+        }
+    }
+
+    public function delete(string $publicId): void
+    {
+        $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
+        if ($schedule === null) throw new RuntimeException('Schedule was not found.');
+        $deviceId = (int) ($this->db->table('schedule_targets')->select('device_id')->where('schedule_id', $schedule->id)->get()->getRowArray()['device_id'] ?? 0);
+        $this->db->transBegin();
+        try {
+            if (! (new ScheduleModel())->delete($schedule->id)) throw new RuntimeException('Schedule could not be deleted.');
+            $this->bumpDeviceRevision($deviceId);
+            $this->finishTransaction();
+        } catch (Throwable $error) {
+            $this->db->transRollback();
+            throw $error;
+        }
+    }
+
+    /** @return array{revision:int,schedules:list<array<string,mixed>>} */
+    public function playerPayload(Device $device): array
+    {
+        $rows = $this->db->table('schedules s')
+            ->select('s.*')->join('schedule_targets st', 'st.schedule_id = s.id')
+            ->where('st.device_id', $device->id)->where('s.status', 'active')
+            ->where('s.end_at >', gmdate('Y-m-d H:i:s'))->orderBy('s.start_at', 'ASC')->get()->getResultArray();
+        $schedules = [];
+        foreach ($rows as $row) {
+            $playlist = [];
+            foreach ($this->itemsForSchedule((int) $row['id']) as $item) {
+                $entry = [
+                    'mediaKey' => $item['media_key'],
+                    'title' => $item['title_snapshot'],
+                    'durationMs' => (int) $item['duration_override_ms'],
+                    'order' => (int) $item['position'],
+                ];
+                if ($item['asset_public_id'] !== null) $entry['assetId'] = $item['asset_public_id'];
+                $playlist[] = $entry;
+            }
+            if ($playlist === []) continue;
+            $schedules[] = [
+                'id' => $row['public_id'],
+                'title' => $row['title'],
+                'revision' => (int) $row['revision'],
+                'priority' => (int) $row['priority'],
+                'startTime' => $this->utcAtom((string) $row['start_at']),
+                'endTime' => $this->utcAtom((string) $row['end_at']),
+                'recurrence' => null,
+                'enabled' => true,
+                'loop' => (bool) $row['loop_enabled'],
+                'playlist' => $playlist,
+            ];
+        }
+        return ['revision' => (int) $device->schedule_revision, 'schedules' => $schedules];
+    }
+
+    /** @param array<string, mixed> $input @return array<string, mixed> */
+    private function normalize(array $input, ?int $excludeScheduleId = null): array
+    {
+        $errors = [];
+        $title = trim((string) ($input['title'] ?? ''));
+        if ($title === '' || mb_strlen($title) > 255) $errors['title'] = 'Title is required and must not exceed 255 characters.';
+
+        $devicePublicId = trim((string) ($input['device_id'] ?? ''));
+        $device = (new DeviceModel())->where('public_id', $devicePublicId)->where('status', 'active')->first();
+        if ($device === null) $errors['device_id'] = 'Choose an active Player.';
+        $timezoneName = $device?->timezone ?: 'Asia/Jakarta';
+        try {
+            $timezone = new DateTimeZone($timezoneName);
+        } catch (Throwable) {
+            $timezone = new DateTimeZone('Asia/Jakarta');
+        }
+
+        $startInput = trim((string) ($input['start_at'] ?? ''));
+        $start = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $startInput, $timezone);
+        $dateErrors = DateTimeImmutable::getLastErrors();
+        if ($start === false || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+            $errors['start_at'] = 'Choose a valid start date and time.';
+        }
+
+        $keys = is_array($input['media_keys'] ?? null) ? array_values($input['media_keys']) : [];
+        $durations = is_array($input['duration_ms'] ?? null) ? array_values($input['duration_ms']) : [];
+        if ($keys === []) $errors['playlist'] = 'Add at least one Ready media item.';
+        if (count($keys) > 100) $errors['playlist'] = 'A playlist may contain at most 100 items.';
+
+        $ready = [];
+        if ($device !== null) {
+            foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'ready')->findAll() as $asset) {
+                $ready[(string) $asset->media_key] = $asset;
+            }
+        }
+        $items = [];
+        $totalDurationMs = 0;
+        foreach ($keys as $index => $value) {
+            $key = trim((string) $value);
+            $asset = $ready[$key] ?? null;
+            if ($asset === null) {
+                $errors["playlist.{$index}"] = 'A selected media item is no longer Ready on this Player.';
+                continue;
+            }
+            $duration = filter_var($durations[$index] ?? null, FILTER_VALIDATE_INT);
+            $duration = $duration === false ? 0 : (int) $duration;
+            if ($duration <= 0) $duration = (int) $asset->duration_ms;
+            if ($duration <= 0 || $duration > 86400000) {
+                $errors["duration.{$index}"] = 'Each duration must be between 1 millisecond and 24 hours.';
+                continue;
+            }
+            $totalDurationMs += $duration;
+            $items[] = [
+                'position' => $index,
+                'asset_id' => $asset->asset_id !== null ? (int) $asset->asset_id : null,
+                'media_key' => $key,
+                'title_snapshot' => $asset->title,
+                'duration_override_ms' => $duration,
+            ];
+        }
+        if ($totalDurationMs <= 0) $errors['playlist_duration'] = 'The playlist must have a valid total duration.';
+
+        if ($errors !== []) throw new ScheduleValidationException($errors);
+        $startUtc = $start->setTimezone(new DateTimeZone('UTC'));
+        $endUtc = $startUtc->modify('+' . $totalDurationMs . ' milliseconds');
+        if ($endUtc <= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
+            throw new ScheduleValidationException(['start_at' => 'The schedule must end in the future.']);
+        }
+
+        $conflict = $this->db->table('schedules s')->select('s.title')
+            ->join('schedule_targets st', 'st.schedule_id = s.id')
+            ->where('st.device_id', $device->id)->where('s.status', 'active')
+            ->where('s.start_at <', $endUtc->format('Y-m-d H:i:s.u'))
+            ->where('s.end_at >', $startUtc->format('Y-m-d H:i:s.u'));
+        if ($excludeScheduleId !== null) $conflict->where('s.id !=', $excludeScheduleId);
+        $conflictRow = $conflict->get()->getRowArray();
+        if ($conflictRow !== null) {
+            throw new ScheduleValidationException(['start_at' => 'This time overlaps schedule "' . $conflictRow['title'] . '" on the same Player.']);
+        }
+
+        return [
+            'title' => $title, 'description' => trim((string) ($input['description'] ?? '')) ?: null,
+            'device' => $device, 'timezone' => $timezoneName,
+            'start_at' => $startUtc->format('Y-m-d H:i:s.u'), 'end_at' => $endUtc->format('Y-m-d H:i:s.u'),
+            'priority' => max(-100, min(100, (int) ($input['priority'] ?? 0))),
+            'loop_enabled' => isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1',
+            'items' => $items,
+        ];
+    }
+
+    /** @param array<string, mixed> $data */
+    private function persist(?int $scheduleId, string $publicId, array $data, int $createdBy): void
+    {
+        $oldDeviceId = $scheduleId === null ? 0 : (int) ($this->db->table('schedule_targets')->select('device_id')->where('schedule_id', $scheduleId)->get()->getRowArray()['device_id'] ?? 0);
+        $existingStatus = $scheduleId === null ? 'active' : (string) ($this->db->table('schedules')->select('status')->where('id', $scheduleId)->get()->getRowArray()['status'] ?? 'active');
+        $deviceId = (int) $data['device']->id;
+        $this->db->transBegin();
+        try {
+            $values = [
+                'public_id' => $publicId, 'title' => $data['title'], 'description' => $data['description'],
+                'start_at' => $data['start_at'], 'end_at' => $data['end_at'], 'timezone' => $data['timezone'],
+                'recurrence' => 'one_time', 'recurrence_config' => null, 'status' => $existingStatus,
+                'priority' => $data['priority'], 'loop_enabled' => $data['loop_enabled'], 'created_by' => $createdBy,
+            ];
+            $model = new ScheduleModel();
+            if ($scheduleId === null) {
+                $values['revision'] = 1;
+                $scheduleId = $model->insert($values, true);
+                if (! is_int($scheduleId)) throw new RuntimeException('Schedule could not be created.');
+            } else {
+                unset($values['public_id']);
+                $values['revision'] = new RawSql('revision + 1');
+                if (! $this->db->table('schedules')->where('id', $scheduleId)->update($values)) throw new RuntimeException('Schedule could not be updated.');
+                $this->db->table('schedule_items')->where('schedule_id', $scheduleId)->delete();
+                $this->db->table('schedule_targets')->where('schedule_id', $scheduleId)->delete();
+            }
+            $this->db->table('schedule_targets')->insert(['schedule_id' => $scheduleId, 'device_id' => $deviceId, 'created_at' => gmdate('Y-m-d H:i:s')]);
+            foreach ($data['items'] as $item) {
+                $this->db->table('schedule_items')->insert([
+                    'schedule_id' => $scheduleId, ...$item,
+                    'created_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s'),
+                ]);
+            }
+            $this->bumpDeviceRevision($deviceId);
+            if ($oldDeviceId > 0 && $oldDeviceId !== $deviceId) $this->bumpDeviceRevision($oldDeviceId);
+            $this->finishTransaction();
+        } catch (Throwable $error) {
+            $this->db->transRollback();
+            throw $error;
+        }
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function itemsForSchedule(int $scheduleId): array
+    {
+        return $this->db->table('schedule_items si')
+            ->select('si.*, a.public_id AS asset_public_id')
+            ->join('assets a', 'a.id = si.asset_id', 'left')
+            ->where('si.schedule_id', $scheduleId)->orderBy('si.position', 'ASC')->get()->getResultArray();
+    }
+
+    /** @param array<string, mixed> $schedule */
+    private function displayStatus(array $schedule): string
+    {
+        if ($schedule['status'] !== 'active') return 'disabled';
+        $now = time();
+        $start = strtotime((string) $schedule['start_at'] . ' UTC');
+        $end = strtotime((string) $schedule['end_at'] . ' UTC');
+        if ($now < $start) return 'upcoming';
+        if ($now < $end) return 'active';
+        return 'completed';
+    }
+
+    private function bumpDeviceRevision(int $deviceId): void
+    {
+        if ($deviceId <= 0) return;
+        $this->db->table('devices')->where('id', $deviceId)->update([
+            'schedule_revision' => new RawSql('schedule_revision + 1'),
+            'updated_at' => gmdate('Y-m-d H:i:s'),
+        ]);
+    }
+
+    private function finishTransaction(): void
+    {
+        if ($this->db->transStatus() === false) throw new RuntimeException('Schedule database transaction failed.');
+        $this->db->transCommit();
+    }
+
+    private function utcAtom(string $value): string
+    {
+        return (new DateTimeImmutable($value, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->format(DATE_ATOM);
+    }
+
+    private function uuidV4(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+        return sprintf('%s-%s-%s-%s-%s', substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4), substr($hex, 16, 4), substr($hex, 20));
+    }
+}

@@ -31,6 +31,11 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('assets/(:segment)/unassign/(:segment)', 'Web\AssetController::unassign/$1/$2');
     $routes->post('assets/(:segment)/remove/(:segment)', 'Web\AssetController::unassignAndRemove/$1/$2');
     $routes->post('assets/(:segment)/delete', 'Web\AssetController::delete/$1');
+    $routes->get('schedules', 'Web\ScheduleController::index');
+    $routes->post('schedules', 'Web\ScheduleController::create');
+    $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
+    $routes->post('schedules/(:segment)/status', 'Web\ScheduleController::status/$1');
+    $routes->post('schedules/(:segment)/delete', 'Web\ScheduleController::delete/$1');
 });
 $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('health', 'Api\HealthController::index');
@@ -56,4 +61,5 @@ $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('player/assets/removals', 'Api\Player\AssetController::removals');
     $routes->post('player/assets/(:segment)/removed', 'Api\Player\AssetController::removed/$1');
     $routes->get('player/assets/(:segment)/download', 'Api\Player\AssetController::download/$1');
+    $routes->get('player/schedules', 'Api\Player\ScheduleController::index');
 });

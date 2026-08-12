@@ -255,6 +255,31 @@ Asset lifecycle actions are intentionally separate:
 Because the Socket.IO gateway is not enabled yet, offline or running Players
 receive removal requests through the regular startup/manual-refresh flow.
 
+## Schedule management
+
+Administrators create one-time playlists from **Control Center → Schedules**.
+After selecting a target Player, the media picker contains only inventory items
+that the Player most recently reported as `ready`. Playlist order and each
+item's detected duration can be adjusted. The CMS interprets the chosen wall
+clock time in the Player timezone, stores UTC timestamps, rejects overlaps on
+the same Player, and increments `devices.schedule_revision` after every create,
+update, enable/disable, or delete operation.
+
+Until Socket.IO is enabled, the Player retrieves the authoritative snapshot on
+startup and manual refresh:
+
+```text
+GET /api/player/schedules
+Authorization: Bearer <device-token>
+```
+
+The token scopes the response to one Player. Local Media Folder entries are
+identified by `mediaKey`; CMS-managed downloads also include their catalog
+`assetId`. Absolute Player paths never enter the CMS database or API. The
+Player resolves those identities locally, atomically caches the accepted
+revision, and its scheduler starts VLC when the configured time arrives. The
+last accepted cache remains usable while the CMS is temporarily offline.
+
 ## Database foundation
 
 The first migration creates:
