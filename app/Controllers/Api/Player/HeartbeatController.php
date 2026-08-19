@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\LdgCryptoService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Throwable;
@@ -24,6 +25,9 @@ class HeartbeatController extends BaseController
         }
         if (isset($input['timezone']) && ! in_array((string) $input['timezone'], DateTimeZone::listIdentifiers(), true)) {
             $errors['timezone'] = 'Timezone must be a valid IANA timezone identifier.';
+        }
+        if (isset($input['ldg_version']) && ! in_array((string) $input['ldg_version'], ['', LdgCryptoService::FORMAT], true)) {
+            $errors['ldg_version'] = 'Unsupported LDG capability.';
         }
         if ($errors !== []) {
             return $this->response->setStatusCode(422)->setJSON([

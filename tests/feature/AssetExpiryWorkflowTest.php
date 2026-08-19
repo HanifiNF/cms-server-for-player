@@ -4,6 +4,7 @@ use App\Libraries\AssetExpiryService;
 use App\Libraries\ScheduleService;
 use App\Libraries\ScheduleValidationException;
 use App\Models\AssetModel;
+use App\Models\AssetVersionModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\UserModel;
@@ -29,6 +30,7 @@ final class AssetExpiryWorkflowTest extends CIUnitTestCase
         $this->assertSame(1, $result['expired']);
         $this->assertSame(1, $result['assignments']);
         $this->assertSame('expired', (new AssetModel())->find($fixture['assetId'])->status);
+        $this->assertSame('expired', (new AssetVersionModel())->find($fixture['versionId'])->status);
         $this->assertSame('removal_pending', (new DeviceAssetModel())->find($fixture['assignmentId'])->status);
         $device = (new DeviceModel())->find($fixture['deviceId']);
         $this->assertSame(1, $device->asset_revision);
@@ -123,12 +125,18 @@ final class AssetExpiryWorkflowTest extends CIUnitTestCase
             'sha256' => str_repeat('a', 64), 'duration_ms' => 60000, 'status' => 'active',
             'expires_on' => $expiresOn, 'created_by' => $adminId,
         ], true);
+        $versionId = (new AssetVersionModel())->insert([
+            'asset_id' => $assetId, 'revision' => 1, 'filename' => 'licensed.mp4',
+            'storage_key' => 'assets/licensed.mp4', 'mime_type' => 'video/mp4',
+            'size_bytes' => 1024, 'sha256' => str_repeat('a', 64), 'duration_ms' => 60000,
+            'status' => 'approved', 'submitted_by' => $adminId,
+        ], true);
         $assignmentId = (new DeviceAssetModel())->insert([
             'device_id' => $deviceId, 'asset_id' => $assetId, 'media_key' => 'managed:' . $publicId,
             'source' => 'managed', 'title' => 'Licensed Film', 'filename' => 'licensed.mp4',
             'relative_path' => 'licensed.mp4', 'size_bytes' => 1024, 'duration_ms' => 60000,
             'sha256' => str_repeat('a', 64), 'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
         ], true);
-        return compact('adminId', 'token', 'deviceId', 'devicePublicId', 'publicId', 'assetId', 'assignmentId');
+        return compact('adminId', 'token', 'deviceId', 'devicePublicId', 'publicId', 'assetId', 'versionId', 'assignmentId');
     }
 }

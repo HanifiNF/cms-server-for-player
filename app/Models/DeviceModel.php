@@ -17,5 +17,6 @@ class DeviceModel extends Model
         'timezone', 'last_seen_at', 'registered_at', 'token_last_used_at', 'ip_address',
         'assigned_user_id', 'claimed_by', 'claimed_at', 'location',
         'inventory_revision', 'asset_revision', 'schedule_revision',
+        'ldg_version',
     ];
 }

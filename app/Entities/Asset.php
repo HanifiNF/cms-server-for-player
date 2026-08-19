@@ -12,5 +12,10 @@ class Asset extends Entity
         'size_bytes'  => 'integer',
         'duration_ms' => 'integer',
         'production_year' => '?integer',
+        'revision' => 'integer',
+        'plaintext_size_bytes' => '?integer',
+        'ldg_chunk_size' => '?integer',
+        'key_version' => 'integer',
+        'encryption_revision' => '?integer',
     ];
 }

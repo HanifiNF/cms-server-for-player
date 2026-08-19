@@ -47,6 +47,13 @@ class AssetExpiryService
                 if ($this->db->affectedRows() === 0) {
                     continue;
                 }
+                $currentVersion = $this->db->table('asset_versions')->select('id')
+                    ->where('asset_id', $assetId)->orderBy('revision', 'DESC')->get(1)->getRowArray();
+                if ($currentVersion !== null) {
+                    $this->db->table('asset_versions')->where('id', $currentVersion['id'])->update([
+                        'status' => 'expired', 'updated_at' => gmdate('Y-m-d H:i:s'),
+                    ]);
+                }
 
                 $assignments = $this->db->table('device_assets')->select('id, device_id')
                     ->where('asset_id', $assetId)->get()->getResultArray();

@@ -2,3 +2,4 @@
 - UI enhancement
 - Vlc Config Panel
 - add location and change player to studio (1 location many studio)
+- media library panel (melihat semua film dari semua player, lalu masing-masing film card memiliki info tentang player mana saja yang punya)

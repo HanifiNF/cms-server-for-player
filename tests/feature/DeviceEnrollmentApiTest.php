@@ -56,6 +56,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             'app_version'       => '1.1.0',
             'platform'          => 'win32-x64',
             'timezone'          => 'Asia/Jakarta',
+            'ldg_version'       => 'ldg-v1',
         ];
 
         $registration = $this->withBodyFormat('json')->post('/api/player/register', $registrationPayload);
@@ -81,6 +82,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             'app_version' => '1.1.1',
             'platform'    => 'win32-x64',
             'timezone'    => 'Asia/Jakarta',
+            'ldg_version' => 'ldg-v1',
         ]);
         $heartbeat->assertStatus(200);
         $heartbeat->assertJSONFragment(['data' => [
@@ -99,6 +101,8 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
         $this->assertSame('Test Lobby Player', $deviceList[0]['name']);
         $this->assertSame('online', $deviceList[0]['connection_status']);
         $this->assertSame('1.1.1', $deviceList[0]['app_version']);
+        $this->assertSame('ldg-v1', $deviceList[0]['ldg_version']);
+        $this->assertSame('ldg-v1', (new DeviceModel())->where('public_id', $registrationData['device_id'])->first()->ldg_version);
 
         $stillValidToken = $this->withHeaders([
             'Authorization' => 'Bearer ' . $registrationData['token'],
@@ -199,7 +203,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
                 'public_id' => $publicId, 'title' => 'Remote Film', 'filename' => 'Remote Film.mp4',
                 'storage_key' => 'assets/' . $publicId . '.mp4', 'mime_type' => 'video/mp4',
                 'size_bytes' => strlen($content), 'sha256' => hash('sha256', $content),
-                'duration_ms' => 30000, 'status' => 'active',
+                'duration_ms' => 30000, 'status' => 'active', 'revision' => 2,
             ], true);
             (new DeviceAssetModel())->insert([
                 'device_id' => $assignedDeviceId, 'asset_id' => $assetId,
@@ -217,6 +221,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             $this->assertSame($publicId, $manifestData[0]['id']);
             $this->assertSame('Remote Film.mp4', $manifestData[0]['filename']);
             $this->assertSame(strlen($content), $manifestData[0]['size']);
+            $this->assertSame(2, $manifestData[0]['revision']);
 
             $emptyManifest = $this->withHeaders(['Authorization' => 'Bearer ' . $otherToken])->get('/api/player/assets/assigned');
             $emptyManifest->assertOK();

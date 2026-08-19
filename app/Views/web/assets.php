@@ -47,14 +47,14 @@
       <article class="card empty-state"><strong>No media assets yet</strong><p><?= $isAdmin ? 'Upload the first film to begin distributing it.' : 'Upload your first film for administrator review.' ?></p></article>
     <?php endif ?>
     <div class="catalog-list">
-      <?php foreach ($assets as $asset): $assetAssignments = $assignments[(int) $asset->id] ?? []; $expiresOn = $asset->expires_on ? $asset->expires_on->format('Y-m-d') : null; $expiryDays = $expiresOn ? (int) ((strtotime($expiresOn) - strtotime($catalogToday)) / 86400) : null; ?>
+      <?php foreach ($assets as $asset): $assetAssignments = $assignments[(int) $asset->id] ?? []; $assetVersions = $versionHistory[(int) $asset->id] ?? []; $expiresOn = $asset->expires_on ? $asset->expires_on->format('Y-m-d') : null; $expiryDays = $expiresOn ? (int) ((strtotime($expiresOn) - strtotime($catalogToday)) / 86400) : null; ?>
         <article class="card catalog-card">
           <div class="catalog-head">
             <div class="catalog-title-group">
               <?php if ($asset->poster_storage_key): ?><img class="asset-poster" src="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/poster') ?>?v=<?= rawurlencode((string) $asset->updated_at) ?>" alt="Poster <?= esc($asset->title) ?>"><?php else: ?><span class="asset-poster placeholder">NO POSTER</span><?php endif ?>
-              <div><p>ASSET</p><h3><?= esc($asset->title) ?></h3><small><?= esc($asset->filename) ?></small><?php if ($asset->distributor_company): ?><em><?= esc($asset->distributor_company) ?></em><?php endif ?></div>
+              <div><p>ASSET · REVISION <?= max(1, (int) $asset->revision) ?></p><h3><?= esc($asset->title) ?></h3><small><?= esc($asset->filename) ?></small><?php if ($asset->distributor_company): ?><em><?= esc($asset->distributor_company) ?></em><?php endif ?></div>
             </div>
-            <span class="badge asset-status <?= esc($asset->status) ?>"><?= esc(strtoupper($asset->status)) ?></span>
+            <div class="catalog-status-group"><?php if ($asset->encryption_format === 'ldg-v1'): ?><span class="badge ldg-protected">LDG PROTECTED</span><?php else: ?><span class="badge legacy-media">LEGACY MEDIA</span><?php endif ?><span class="badge asset-status <?= esc($asset->status) ?>"><?= esc(strtoupper($asset->status)) ?></span></div>
           </div>
           <dl class="asset-facts">
             <div><dt>Size</dt><dd><?= number_format(((int) $asset->size_bytes) / 1048576, 2) ?> MB</dd></div>
@@ -80,6 +80,20 @@
               <?php if ($asset->reviewed_at !== null): ?><span><small>REVIEWED AT</small><strong><?= esc($asset->reviewed_at->format('Y-m-d H:i')) ?> UTC</strong></span><?php endif ?>
             </div>
           </div>
+          <?php if ($assetVersions !== []): ?>
+            <details class="asset-version-history"><summary>Revision history <span><?= count($assetVersions) ?> version<?= count($assetVersions) === 1 ? '' : 's' ?></span></summary>
+              <div class="version-history-list">
+                <?php foreach ($assetVersions as $version): ?>
+                  <article>
+                    <div class="version-history-head"><strong>Revision <?= (int) $version->revision ?></strong><span class="badge asset-status <?= esc($version->status) ?>"><?= esc(strtoupper($version->status)) ?></span></div>
+                    <p><?= esc($version->filename) ?></p>
+                    <dl><div><dt>Submitted by</dt><dd><?= esc($userNames[(int) $version->submitted_by] ?? 'Unknown account') ?></dd></div><div><dt>Submitted at</dt><dd><?= esc($version->created_at->format('Y-m-d H:i')) ?> UTC</dd></div><div><dt>Size</dt><dd><?= number_format(((int) $version->size_bytes) / 1048576, 2) ?> MB</dd></div><div><dt>SHA-256</dt><dd><code><?= esc(substr($version->sha256, 0, 12)) ?>…</code></dd></div></dl>
+                    <?php if ($version->rejection_reason): ?><div class="version-feedback"><strong>Review feedback</strong><p><?= nl2br(esc($version->rejection_reason)) ?></p></div><?php endif ?>
+                  </article>
+                <?php endforeach ?>
+              </div>
+            </details>
+          <?php endif ?>
           <?php if ($isAdmin || in_array($asset->status, ['draft', 'rejected'], true)): ?>
             <details class="asset-metadata-editor"><summary>Edit film metadata</summary>
               <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/metadata') ?>" enctype="multipart/form-data" class="metadata-edit-form">
@@ -96,16 +110,27 @@
             </details>
           <?php endif ?>
           <?php if ($asset->status === 'rejected' && $asset->rejection_reason): ?><div class="asset-review-note rejected"><strong>Review feedback</strong><p><?= nl2br(esc($asset->rejection_reason)) ?></p></div><?php endif ?>
-          <?php if ($isAdmin && in_array($asset->status, ['draft', 'rejected'], true)): ?>
+          <?php if (! $isAdmin && $asset->status === 'rejected'): ?>
+            <div class="asset-correction-zone">
+              <div><strong>Submit a corrected revision</strong><p>Update metadata above if needed. Choose a replacement film only when the media file itself changed.</p></div>
+              <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/resubmit') ?>" enctype="multipart/form-data" class="asset-correction-form">
+                <?= csrf_field() ?>
+                <label>Replacement media <span class="muted">(optional)</span><input type="file" name="media" accept="video/*,.mkv,.ts"></label>
+                <button class="btn primary" type="submit" onclick="return confirm('Submit this correction as a new Draft revision?')">Submit Revision <?= max(1, (int) $asset->revision) + 1 ?></button>
+              </form>
+            </div>
+          <?php endif ?>
+          <?php if ($isAdmin && $asset->status === 'draft'): ?>
             <div class="asset-approval-zone">
               <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/approve') ?>"><?= csrf_field() ?><button class="btn primary" type="submit" onclick="return confirm('Approve this film for Player distribution?')">Approve Film</button></form>
-              <?php if ($asset->status === 'draft'): ?><form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/reject') ?>" class="asset-reject-form"><?= csrf_field() ?><label>Rejection reason<textarea name="rejection_reason" maxlength="1000" required placeholder="Explain what the distributor must correct"></textarea></label><button class="btn danger" type="submit">Reject Film</button></form><?php endif ?>
+              <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/reject') ?>" class="asset-reject-form"><?= csrf_field() ?><label>Rejection reason<textarea name="rejection_reason" maxlength="1000" required placeholder="Explain what the distributor must correct"></textarea></label><button class="btn danger" type="submit">Reject Film</button></form>
             </div>
+          <?php elseif ($isAdmin && $asset->status === 'rejected'): ?><div class="asset-review-note rejected"><strong>Waiting for distributor correction</strong><p>The rejected revision cannot be approved again until the distributor submits a new Draft revision.</p></div>
           <?php elseif (!$isAdmin && $asset->status === 'draft'): ?><div class="asset-review-note"><strong>Waiting for administrator review</strong><p>This film cannot be assigned or downloaded by a Player yet.</p></div><?php endif ?>
           <?php if ($isAdmin && $asset->status === 'active'): ?>
           <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/assign') ?>" class="asset-assign-form">
             <?= csrf_field() ?>
-            <label>Assign to Player<select name="device_id" required><option value="">Choose an active Player</option><?php foreach ($devices as $device): ?><option value="<?= esc($device->public_id) ?>"><?= esc($device->name) ?><?= $device->location ? ' — ' . esc($device->location) : '' ?></option><?php endforeach ?></select></label>
+            <label>Assign to Player<select name="device_id" required><option value="">Choose an active Player</option><?php foreach ($devices as $device): $incompatible = $asset->encryption_format === 'ldg-v1' && $device->ldg_version !== 'ldg-v1'; ?><option value="<?= esc($device->public_id) ?>" <?= $incompatible ? 'disabled' : '' ?>><?= esc($device->name) ?><?= $device->location ? ' — ' . esc($device->location) : '' ?><?= $incompatible ? ' — Player update required' : '' ?></option><?php endforeach ?></select></label>
             <button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>>Assign</button>
           </form>
           <?php endif ?>
@@ -204,8 +229,8 @@
       eta.textContent = formatEta((progress.total - progress.loaded) / bytesPerSecond);
     };
     request.upload.onload = () => {
-      status.textContent = 'Processing media…'; percent.textContent = '100%'; fill.style.width = '100%';
-      fill.classList.add('processing'); eta.textContent = 'Verifying SHA-256 and duration…'; cancel.disabled = true;
+      status.textContent = 'Encrypting media as LDG…'; percent.textContent = '100%'; fill.style.width = '100%';
+      fill.classList.add('processing'); eta.textContent = 'Detecting duration, encrypting chunks, and verifying SHA-256…'; cancel.disabled = true;
     };
     request.onload = () => {
       const payload = request.response || {};

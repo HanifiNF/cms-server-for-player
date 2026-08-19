@@ -121,6 +121,7 @@ class DeviceEnrollmentService
                 'platform'           => $metadata['platform'] ?? null,
                 'timezone'           => $metadata['timezone'] ?? $device->timezone,
                 'ip_address'         => $ipAddress,
+                'ldg_version'        => $metadata['ldg_version'] ?? null,
             ])
             ->update();
         $affectedRows = $this->db->affectedRows();
@@ -181,6 +182,7 @@ class DeviceEnrollmentService
             'registered_at'         => $this->databaseTime($now),
             'token_last_used_at'    => $this->databaseTime($now),
             'ip_address'            => $ipAddress,
+            'ldg_version'           => $metadata['ldg_version'] ?? null,
         ];
 
         $this->db->transStart();
@@ -230,7 +232,7 @@ class DeviceEnrollmentService
             'ip_address'         => $ipAddress,
         ];
 
-        foreach (['app_version', 'platform', 'timezone'] as $field) {
+        foreach (['app_version', 'platform', 'timezone', 'ldg_version'] as $field) {
             if (isset($metadata[$field]) && $metadata[$field] !== '') {
                 $updates[$field] = $metadata[$field];
             }

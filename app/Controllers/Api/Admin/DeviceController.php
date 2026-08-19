@@ -93,6 +93,7 @@ class DeviceController extends BaseController
             'connection_status'  => $service->connectionStatus($device),
             'app_version'        => $device->app_version,
             'platform'           => $device->platform,
+            'ldg_version'        => $device->ldg_version,
             'timezone'           => $device->timezone,
             'ip_address'         => $device->ip_address,
             'last_seen_at'       => $device->last_seen_at?->toDateTimeString(),

@@ -5,6 +5,7 @@ namespace App\Controllers\Api\Player;
 use App\Controllers\BaseController;
 use App\Libraries\AssetInventoryService;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\LdgCryptoService;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Models\AssetModel;
@@ -89,22 +90,50 @@ class AssetController extends BaseController
         $assignments = (new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id !=', null)->findAll();
         $assets = [];
         $assetModel = new AssetModel();
+        $ldg = new LdgCryptoService();
+        $playerToken = $this->bearerToken();
         foreach ($assignments as $assignment) {
             if ($assignment->status === 'removal_pending') continue;
             $asset = $assetModel->where('id', $assignment->asset_id)->where('status', 'active')->first();
             if ($asset === null) continue;
+            $encrypted = (string) ($asset->encryption_format ?? '') === LdgCryptoService::FORMAT;
+            if ($encrypted && (string) ($device->ldg_version ?? '') !== LdgCryptoService::FORMAT) continue;
+            $crypto = null;
+            if ($encrypted) {
+                try {
+                    $crypto = [
+                        'format' => LdgCryptoService::FORMAT,
+                        'header_size' => LdgCryptoService::HEADER_SIZE,
+                        'chunk_size' => (int) $asset->ldg_chunk_size,
+                        'plaintext_size' => (int) $asset->plaintext_size_bytes,
+                        'plaintext_sha256' => (string) $asset->plaintext_sha256,
+                        'original_mime_type' => (string) $asset->mime_type,
+                        'encryption_revision' => max(1, (int) ($asset->encryption_revision ?? $asset->revision)),
+                        'license' => $ldg->deviceLicense($asset, (string) $device->public_id, $playerToken),
+                    ];
+                } catch (\Throwable $error) {
+                    log_message('error', 'LDG license delivery failed for {asset}: {message}', [
+                        'asset' => $asset->public_id, 'message' => $error->getMessage(),
+                    ]);
+                    return $this->response->setStatusCode(500)->setJSON([
+                        'error' => ['code' => 'asset_license_failed', 'message' => 'The encrypted asset license could not be issued.'],
+                    ]);
+                }
+            }
             $assets[] = [
                 'id' => $asset->public_id,
-                'filename' => $asset->filename,
+                'filename' => $encrypted ? $ldg->downloadFilename($asset) : $asset->filename,
+                'display_filename' => $asset->filename,
                 'download_url' => '/api/player/assets/' . rawurlencode($asset->public_id) . '/download',
                 'size' => (int) $asset->size_bytes,
                 'sha256' => $asset->sha256,
-                'mime_type' => $asset->mime_type,
+                'mime_type' => $encrypted ? LdgCryptoService::MIME_TYPE : $asset->mime_type,
                 'duration_ms' => (int) $asset->duration_ms,
-                'revision' => 1,
+                'revision' => max(1, (int) $asset->revision),
+                'encryption' => $crypto,
             ];
         }
-        return $this->response->setJSON(['data' => $assets]);
+        return $this->response->setHeader('Cache-Control', 'no-store')->setJSON(['data' => $assets]);
     }
 
     public function removals(): ResponseInterface
@@ -121,7 +150,12 @@ class AssetController extends BaseController
             if ($assignment->asset_id === null) continue;
             $asset = $assetModel->find($assignment->asset_id);
             if ($asset === null) continue;
-            $items[] = ['id' => $asset->public_id, 'filename' => $asset->filename];
+            $encrypted = (string) ($asset->encryption_format ?? '') === LdgCryptoService::FORMAT;
+            $items[] = [
+                'id' => $asset->public_id,
+                'filename' => $encrypted ? (new LdgCryptoService())->downloadFilename($asset) : $asset->filename,
+                'encryption_format' => $encrypted ? LdgCryptoService::FORMAT : null,
+            ];
         }
         return $this->response->setJSON(['data' => $items]);
     }
@@ -189,9 +223,10 @@ class AssetController extends BaseController
             [$start, $end] = $range;
             $partial = true;
         }
+        $encrypted = (string) ($asset->encryption_format ?? '') === LdgCryptoService::FORMAT;
         return new RangeFileResponse(
-            $filePath, $start, $end, (string) $asset->filename,
-            (string) ($asset->mime_type ?: 'application/octet-stream'), $etag, $partial,
+            $filePath, $start, $end, $encrypted ? (new LdgCryptoService())->downloadFilename($asset) : (string) $asset->filename,
+            $encrypted ? LdgCryptoService::MIME_TYPE : (string) ($asset->mime_type ?: 'application/octet-stream'), $etag, $partial,
         );
     }
 
@@ -209,6 +244,12 @@ class AssetController extends BaseController
         if ($start >= $size) return null;
         $end = $matches[2] === '' ? $size - 1 : min((int) $matches[2], $size - 1);
         return $end >= $start ? [$start, $end] : null;
+    }
+
+    private function bearerToken(): string
+    {
+        if (! preg_match('/^Bearer\s+(.+)$/i', trim($this->request->getHeaderLine('Authorization')), $matches)) return '';
+        return trim($matches[1]);
     }
 
     /**

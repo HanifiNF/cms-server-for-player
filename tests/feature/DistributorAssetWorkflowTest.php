@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\AssetModel;
+use App\Models\AssetVersionModel;
 use App\Libraries\ScheduleService;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
@@ -158,6 +159,8 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $this->assertSame(2026, $assetOne->production_year);
         $this->assertSame('2026-09-01', $assetOne->release_date->format('Y-m-d'));
         $this->assertSame($expiresOn, $assetOne->expires_on->format('Y-m-d'));
+        $draftVersion = (new AssetVersionModel())->where('asset_id', $assetOne->id)->where('revision', 1)->first();
+        $this->assertSame('Owned Film Updated', json_decode($draftVersion->metadata_snapshot, true, 512, JSON_THROW_ON_ERROR)['title']);
 
         $foreignUpdate = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
             ->postForm('/control/assets/' . $fixture['assetTwo']->public_id . '/metadata', [
@@ -219,6 +222,57 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $foreignPoster = $this->withSession(['cms_web_user_id' => $fixture['distributorTwoId']])
             ->get('/control/assets/' . $fixture['assetOne']->public_id . '/poster');
         $foreignPoster->assertStatus(404);
+    }
+
+    public function testRejectedFilmRequiresDistributorRevisionBeforeApproval(): void
+    {
+        $fixture = $this->fixture();
+        $assets = new AssetModel();
+        $versions = new AssetVersionModel();
+
+        $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/reject', [
+                'rejection_reason' => 'Replace the damaged opening sequence.',
+            ])->assertRedirectTo('/control/assets');
+        $asset = $assets->find($fixture['assetOne']->id);
+        $this->assertSame('rejected', $asset->status);
+        $revisionOne = $versions->where('asset_id', $asset->id)->where('revision', 1)->first();
+        $this->assertNotNull($revisionOne);
+        $this->assertSame('rejected', $revisionOne->status);
+
+        $blockedApproval = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->postForm('/control/assets/' . $asset->public_id . '/approve', []);
+        $blockedApproval->assertRedirectTo('/control/assets');
+        $this->assertSame('rejected', $assets->find($asset->id)->status);
+
+        $foreignResubmit = $this->withSession(['cms_web_user_id' => $fixture['distributorTwoId']])
+            ->postForm('/control/assets/' . $asset->public_id . '/resubmit', []);
+        $foreignResubmit->assertRedirectTo('/control/assets');
+        $this->assertSame(1, $assets->find($asset->id)->revision);
+
+        $resubmitted = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->postForm('/control/assets/' . $asset->public_id . '/resubmit', []);
+        $resubmitted->assertRedirectTo('/control/assets');
+        $asset = $assets->find($asset->id);
+        $this->assertSame(2, $asset->revision);
+        $this->assertSame('draft', $asset->status);
+        $this->assertNull($asset->rejection_reason);
+        $revisionTwo = $versions->where('asset_id', $asset->id)->where('revision', 2)->first();
+        $this->assertNotNull($revisionTwo);
+        $this->assertSame('draft', $revisionTwo->status);
+        $this->assertSame($revisionOne->storage_key, $revisionTwo->storage_key);
+
+        $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/assets');
+        $page->assertOK();
+        $page->assertSee('REVISION 2');
+        $page->assertSee('Revision history');
+
+        $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->postForm('/control/assets/' . $asset->public_id . '/approve', [])
+            ->assertRedirectTo('/control/assets');
+        $this->assertSame('active', $assets->find($asset->id)->status);
+        $this->assertSame('approved', $versions->find($revisionTwo->id)->status);
+        $this->assertSame('rejected', $versions->find($revisionOne->id)->status);
     }
 
     /** @return array<string, mixed> */

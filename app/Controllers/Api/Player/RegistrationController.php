@@ -7,6 +7,7 @@ use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Libraries\OperatorAuthException;
 use App\Libraries\OperatorAuthService;
+use App\Libraries\LdgCryptoService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Config\Player;
@@ -41,6 +42,9 @@ class RegistrationController extends BaseController
                 $errors[$field] = sprintf('%s must not exceed %d characters.', $field, $limit);
             }
         }
+        if (isset($input['ldg_version']) && ! in_array((string) $input['ldg_version'], ['', LdgCryptoService::FORMAT], true)) {
+            $errors['ldg_version'] = 'Unsupported LDG capability.';
+        }
         if ($errors !== []) {
             return $this->validationError($errors);
         }
@@ -50,6 +54,7 @@ class RegistrationController extends BaseController
                 'app_version' => isset($input['app_version']) ? trim((string) $input['app_version']) : null,
                 'platform'    => isset($input['platform']) ? trim((string) $input['platform']) : null,
                 'timezone'    => $timezone,
+                'ldg_version' => isset($input['ldg_version']) ? trim((string) $input['ldg_version']) : null,
             ], $this->request->getIPAddress());
         } catch (EnrollmentException $exception) {
             return $this->response->setStatusCode($exception->httpStatus)->setJSON([
@@ -96,6 +101,7 @@ class RegistrationController extends BaseController
                 'app_version' => isset($input['app_version']) ? mb_substr(trim((string) $input['app_version']), 0, 32) : null,
                 'platform' => isset($input['platform']) ? mb_substr(trim((string) $input['platform']), 0, 80) : null,
                 'timezone' => isset($input['timezone']) && in_array((string) $input['timezone'], DateTimeZone::listIdentifiers(), true) ? (string) $input['timezone'] : 'Asia/Jakarta',
+                'ldg_version' => ($input['ldg_version'] ?? null) === LdgCryptoService::FORMAT ? LdgCryptoService::FORMAT : null,
             ], $this->request->getIPAddress());
         } catch (EnrollmentException $exception) {
             return $this->response->setStatusCode($exception->httpStatus)->setJSON(['error' => ['code' => $exception->errorCode, 'message' => $exception->getMessage()]]);

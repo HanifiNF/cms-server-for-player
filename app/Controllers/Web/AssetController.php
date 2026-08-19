@@ -4,11 +4,13 @@ namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
 use App\Models\AssetModel;
+use App\Models\AssetVersionModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\UserModel;
 use App\Libraries\AssetExpiryService;
 use App\Libraries\MediaMetadataService;
+use App\Libraries\LdgCryptoService;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
@@ -72,12 +74,20 @@ class AssetController extends BaseController
             $userNames[(int) $user->id] = $user->name;
             if ($user->role === 'distributor') $distributors[] = $user;
         }
+        $versionHistory = [];
+        $scopedAssetIds = array_map(static fn ($asset): int => (int) $asset->id, $scopedAssets);
+        if ($scopedAssetIds !== []) {
+            foreach ((new AssetVersionModel())->whereIn('asset_id', $scopedAssetIds)->orderBy('revision', 'DESC')->findAll() as $version) {
+                $versionHistory[(int) $version->asset_id][] = $version;
+            }
+        }
         return view('web/assets', [
             'title' => 'Assets', 'active' => 'assets', 'admin' => $currentUser,
             'assets' => $assets, 'devices' => $devices, 'assignments' => $assignments,
             'isAdmin' => $isAdmin, 'userNames' => $userNames,
             'statusCounts' => $statusCounts, 'genres' => $genres, 'distributors' => $distributors,
             'catalogToday' => $expiryService->today(),
+            'versionHistory' => $versionHistory,
             'filters' => ['q' => $search, 'status' => $statusFilter, 'genre' => $genreFilter, 'distributor' => $distributorFilter],
         ]);
     }
@@ -101,17 +111,16 @@ class AssetController extends BaseController
 
         $publicId = $this->uuidV4();
         $storageDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
-        $storedName = $publicId . '.' . $extension;
+        $storedName = $publicId . '-r1.ldg';
         $storedPath = $storageDir . DIRECTORY_SEPARATOR . $storedName;
         $posterStoredPath = null;
         $mimeType = $file->getClientMimeType() ?: 'application/octet-stream';
         try {
             if (! is_dir($storageDir) && ! mkdir($storageDir, 0775, true) && ! is_dir($storageDir)) throw new \RuntimeException('Asset storage directory could not be created.');
-            $file->move($storageDir, $storedName);
-            $size = filesize($storedPath);
-            $sha256 = hash_file('sha256', $storedPath);
-            if ($size === false || $size <= 0 || $sha256 === false) throw new \RuntimeException('Uploaded media could not be inspected.');
-            $durationMs = (new MediaMetadataService())->detectDurationMs($storedPath);
+            $sourcePath = $file->getTempName();
+            if ($sourcePath === '' || ! is_file($sourcePath)) throw new RuntimeException('Uploaded media temporary file was not found.');
+            $durationMs = (new MediaMetadataService())->detectDurationMs($sourcePath);
+            $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $storedPath, $publicId, 1);
             $posterValues = ['poster_storage_key' => null, 'poster_filename' => null, 'poster_mime_type' => null];
             if ($posterInfo !== []) {
                 $posterDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'posters';
@@ -127,25 +136,41 @@ class AssetController extends BaseController
             }
             $currentUser = $this->currentUser();
             $status = $currentUser->role === 'distributor' ? 'draft' : 'active';
-            $inserted = (new AssetModel())->insert([
-                'public_id' => $publicId, ...$metadata, ...$posterValues, 'filename' => $filename,
+            $assetValues = [
+                'public_id' => $publicId, 'revision' => 1, ...$metadata, ...$posterValues, 'filename' => $filename,
                 'storage_key' => 'assets/' . $storedName, 'mime_type' => $mimeType,
-                'size_bytes' => $size, 'sha256' => $sha256,
+                ...$encryptionValues,
                 'duration_ms' => $durationMs, 'status' => $status,
                 'created_by' => (int) $currentUser->id,
+            ];
+            $db = Database::connect();
+            $db->transBegin();
+            $inserted = (new AssetModel())->insert($assetValues, true);
+            if (! is_int($inserted)) throw new \RuntimeException('Asset metadata could not be stored.');
+            $versionInserted = (new AssetVersionModel())->insert([
+                'asset_id' => $inserted, 'revision' => 1,
+                'filename' => $filename, 'storage_key' => 'assets/' . $storedName,
+                'mime_type' => $mimeType, ...$encryptionValues,
+                'duration_ms' => $durationMs, 'status' => $status === 'active' ? 'approved' : 'draft',
+                'metadata_snapshot' => $this->versionMetadataSnapshot($assetValues),
+                'submitted_by' => (int) $currentUser->id,
+                'reviewed_by' => $status === 'active' ? (int) $currentUser->id : null,
+                'reviewed_at' => $status === 'active' ? gmdate('Y-m-d H:i:s') : null,
             ], true);
-            if ($inserted === false) throw new \RuntimeException('Asset metadata could not be stored.');
+            if (! is_int($versionInserted) || $db->transStatus() === false) throw new RuntimeException('Asset revision could not be stored.');
+            $db->transCommit();
         } catch (Throwable $exception) {
+            if (isset($db)) $db->transRollback();
             if (is_file($storedPath)) @unlink($storedPath);
             if ($posterStoredPath !== null && is_file($posterStoredPath)) @unlink($posterStoredPath);
             log_message('error', 'Asset upload failed: {message}', ['message' => $exception->getMessage()]);
             return $this->uploadFailure('The media asset could not be uploaded.', 500);
         }
         $message = $status === 'draft'
-            ? 'Film uploaded as Draft and is waiting for administrator approval.'
+            ? 'Film encrypted as LDG v1, uploaded as Draft, and is waiting for administrator approval.'
             : ($durationMs > 0
-                ? 'Asset uploaded with automatically detected duration. Assign it to a Player to start remote download.'
-                : 'Asset uploaded. Duration is pending and will be detected by the first Player that downloads it.');
+                ? 'Asset encrypted as LDG v1 with automatically detected duration. Assign it to a Player to start remote download.'
+                : 'Asset encrypted as LDG v1. Duration is pending.');
         if ($this->request->isAJAX()) {
             return $this->response->setStatusCode(201)->setJSON([
                 'data' => ['asset_id' => $publicId, 'message' => $message],
@@ -183,6 +208,12 @@ class AssetController extends BaseController
                 $metadata['poster_mime_type'] = $posterInfo['mime_type'];
             }
             if (! (new AssetModel())->update($asset->id, $metadata)) throw new RuntimeException('Metadata could not be saved.');
+            if ($asset->status === 'draft') {
+                $version = $this->currentVersionOrCreate($asset);
+                if (! (new AssetVersionModel())->update($version->id, [
+                    'metadata_snapshot' => $this->versionMetadataSnapshot($metadata),
+                ])) throw new RuntimeException('Draft revision metadata could not be saved.');
+            }
             Database::connect()->table('device_assets')->where('asset_id', $asset->id)->update(['title' => $metadata['title']]);
         } catch (Throwable $exception) {
             if ($newPosterPath !== null && is_file($newPosterPath)) @unlink($newPosterPath);
@@ -191,6 +222,82 @@ class AssetController extends BaseController
         }
         if ($newPosterPath !== null && $oldPosterPath !== null && is_file($oldPosterPath)) @unlink($oldPosterPath);
         return redirect()->to('/control/assets')->with('success', 'Film metadata updated.');
+    }
+
+    public function resubmit(string $publicId): RedirectResponse
+    {
+        (new AssetExpiryService())->expireDue();
+        $asset = $this->accessibleAsset($publicId);
+        $currentUser = $this->currentUser();
+        if ($asset === null || $currentUser->role !== 'distributor' || $asset->status !== 'rejected') {
+            return redirect()->to('/control/assets')->with('error', 'Only the owning distributor can resubmit a rejected film.');
+        }
+
+        $file = $this->request->getFile('media');
+        $hasReplacement = $file !== null && $file->getError() !== UPLOAD_ERR_NO_FILE;
+        $revision = max(1, (int) $asset->revision) + 1;
+        $newStoredPath = null;
+        $fileValues = [
+            'filename' => $asset->filename, 'storage_key' => $asset->storage_key,
+            'mime_type' => $asset->mime_type, 'size_bytes' => $asset->size_bytes,
+            'sha256' => $asset->sha256, 'duration_ms' => $asset->duration_ms,
+            'encryption_format' => $asset->encryption_format,
+            'plaintext_size_bytes' => $asset->plaintext_size_bytes,
+            'plaintext_sha256' => $asset->plaintext_sha256,
+            'ldg_chunk_size' => $asset->ldg_chunk_size,
+            'wrapped_dek' => $asset->wrapped_dek,
+            'dek_nonce' => $asset->dek_nonce,
+            'dek_tag' => $asset->dek_tag,
+            'key_version' => $asset->key_version,
+            'encryption_revision' => $asset->encryption_revision,
+        ];
+
+        try {
+            if ($hasReplacement) {
+                if (! $file->isValid() || $file->hasMoved()) throw new RuntimeException('Choose a valid replacement media file.');
+                $filename = basename($file->getClientName());
+                $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                if (! in_array($extension, self::EXTENSIONS, true)) throw new RuntimeException('The replacement file type is not supported.');
+                if (mb_strlen($filename) > 255) throw new RuntimeException('The replacement filename is too long.');
+                $storageDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
+                if (! is_dir($storageDir) && ! mkdir($storageDir, 0775, true) && ! is_dir($storageDir)) {
+                    throw new RuntimeException('Asset storage directory could not be created.');
+                }
+                $storedName = $asset->public_id . '-r' . $revision . '.ldg';
+                $newStoredPath = $storageDir . DIRECTORY_SEPARATOR . $storedName;
+                $sourcePath = $file->getTempName();
+                if ($sourcePath === '' || ! is_file($sourcePath)) throw new RuntimeException('Replacement media temporary file was not found.');
+                $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $newStoredPath, (string) $asset->public_id, $revision);
+                $fileValues = [
+                    'filename' => $filename, 'storage_key' => 'assets/' . $storedName,
+                    'mime_type' => $file->getClientMimeType() ?: 'application/octet-stream',
+                    ...$encryptionValues,
+                    'duration_ms' => (new MediaMetadataService())->detectDurationMs($sourcePath),
+                ];
+            }
+
+            $db = Database::connect();
+            $db->transBegin();
+            $updated = (new AssetModel())->update($asset->id, [
+                ...$fileValues, 'revision' => $revision, 'status' => 'draft',
+                'reviewed_by' => null, 'reviewed_at' => null, 'rejection_reason' => null,
+            ]);
+            if (! $updated) throw new RuntimeException('Corrected asset could not be saved.');
+            $versionId = (new AssetVersionModel())->insert([
+                'asset_id' => $asset->id, 'revision' => $revision, ...$fileValues,
+                'status' => 'draft', 'metadata_snapshot' => $this->versionMetadataSnapshot($asset),
+                'submitted_by' => (int) $currentUser->id,
+            ], true);
+            if (! is_int($versionId) || $db->transStatus() === false) throw new RuntimeException('Corrected revision could not be saved.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            if (isset($db)) $db->transRollback();
+            if ($newStoredPath !== null && is_file($newStoredPath)) @unlink($newStoredPath);
+            log_message('error', 'Asset resubmission failed: {message}', ['message' => $error->getMessage()]);
+            return redirect()->to('/control/assets')->with('error', $error->getMessage());
+        }
+
+        return redirect()->to('/control/assets')->with('success', "Revision {$revision} submitted as Draft for administrator review.");
     }
 
     public function poster(string $publicId): ResponseInterface
@@ -212,6 +319,9 @@ class AssetController extends BaseController
         $asset = (new AssetModel())->where('public_id', $publicId)->where('status', 'active')->first();
         $device = (new DeviceModel())->where('public_id', trim((string) $this->request->getPost('device_id')))->where('status', 'active')->first();
         if ($asset === null || $device === null) return redirect()->to('/control/assets')->with('error', 'Choose an active asset and Player.');
+        if ($asset->encryption_format === LdgCryptoService::FORMAT && $device->ldg_version !== LdgCryptoService::FORMAT) {
+            return redirect()->to('/control/assets')->with('error', 'This Player must be updated and report LDG v1 support before encrypted films can be assigned.');
+        }
         $model = new DeviceAssetModel();
         $db = Database::connect();
         $mediaKey = 'managed:' . $asset->public_id;
@@ -245,13 +355,29 @@ class AssetController extends BaseController
         $model = new AssetModel();
         $asset = $model->where('public_id', $publicId)->first();
         if ($asset === null) return redirect()->to('/control/assets')->with('error', 'Asset was not found.');
-        if (! in_array($asset->status, ['draft', 'rejected'], true)) {
-            return redirect()->to('/control/assets')->with('error', 'Only Draft or Rejected assets can be approved.');
+        if ($asset->status !== 'draft') {
+            return redirect()->to('/control/assets')->with('error', 'Only a Draft revision can be approved.');
         }
-        if (! $model->update($asset->id, [
-            'status' => 'active', 'reviewed_by' => $this->currentUser()->id,
-            'reviewed_at' => gmdate('Y-m-d H:i:s'), 'rejection_reason' => null,
-        ])) return redirect()->to('/control/assets')->with('error', 'The asset could not be approved.');
+        $reviewerId = (int) $this->currentUser()->id;
+        $reviewedAt = gmdate('Y-m-d H:i:s');
+        $db = Database::connect();
+        $db->transBegin();
+        try {
+            $version = $this->currentVersionOrCreate($asset);
+            if (! $model->update($asset->id, [
+                'status' => 'active', 'reviewed_by' => $reviewerId,
+                'reviewed_at' => $reviewedAt, 'rejection_reason' => null,
+            ])) throw new RuntimeException('Asset approval failed.');
+            if (! (new AssetVersionModel())->update($version->id, [
+                'status' => 'approved', 'reviewed_by' => $reviewerId,
+                'reviewed_at' => $reviewedAt, 'rejection_reason' => null,
+            ])) throw new RuntimeException('Revision approval failed.');
+            if ($db->transStatus() === false) throw new RuntimeException('Approval transaction failed.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            $db->transRollback();
+            return redirect()->to('/control/assets')->with('error', 'The asset revision could not be approved.');
+        }
         return redirect()->to('/control/assets')->with('success', 'Film approved. It can now be assigned to a Player.');
     }
 
@@ -267,10 +393,26 @@ class AssetController extends BaseController
         if ($asset->status !== 'draft') {
             return redirect()->to('/control/assets')->with('error', 'Only Draft assets can be rejected.');
         }
-        if (! $model->update($asset->id, [
-            'status' => 'rejected', 'reviewed_by' => $this->currentUser()->id,
-            'reviewed_at' => gmdate('Y-m-d H:i:s'), 'rejection_reason' => $reason,
-        ])) return redirect()->to('/control/assets')->with('error', 'The asset could not be rejected.');
+        $reviewerId = (int) $this->currentUser()->id;
+        $reviewedAt = gmdate('Y-m-d H:i:s');
+        $db = Database::connect();
+        $db->transBegin();
+        try {
+            $version = $this->currentVersionOrCreate($asset);
+            if (! $model->update($asset->id, [
+                'status' => 'rejected', 'reviewed_by' => $reviewerId,
+                'reviewed_at' => $reviewedAt, 'rejection_reason' => $reason,
+            ])) throw new RuntimeException('Asset rejection failed.');
+            if (! (new AssetVersionModel())->update($version->id, [
+                'status' => 'rejected', 'reviewed_by' => $reviewerId,
+                'reviewed_at' => $reviewedAt, 'rejection_reason' => $reason,
+            ])) throw new RuntimeException('Revision rejection failed.');
+            if ($db->transStatus() === false) throw new RuntimeException('Rejection transaction failed.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            $db->transRollback();
+            return redirect()->to('/control/assets')->with('error', 'The asset revision could not be rejected.');
+        }
         return redirect()->to('/control/assets')->with('success', 'Film rejected. The distributor can see the review reason.');
     }
 
@@ -334,18 +476,29 @@ class AssetController extends BaseController
             return redirect()->to('/control/assets')->with('error', 'This asset is referenced by a schedule and cannot be deleted.');
         }
 
-        $originalPath = $this->resolveStoredAssetPath((string) $asset->storage_key);
+        $storageKeys = [(string) $asset->storage_key];
+        foreach ((new AssetVersionModel())->where('asset_id', $asset->id)->findAll() as $version) {
+            $storageKeys[] = (string) $version->storage_key;
+        }
+        $originalPaths = [];
+        foreach (array_unique($storageKeys) as $storageKey) {
+            $path = $this->resolveStoredAssetPath($storageKey);
+            if ($path !== null) $originalPaths[$path] = $path;
+        }
         $posterPath = $this->resolveStoredAssetPath((string) $asset->poster_storage_key);
-        $stagedPath = null;
+        $stagedFiles = [];
         $transactionStarted = false;
         try {
-            if ($originalPath !== null) {
+            if ($originalPaths !== []) {
                 $stagingDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . '.delete-staging';
                 if (! is_dir($stagingDir) && ! mkdir($stagingDir, 0775, true) && ! is_dir($stagingDir)) {
                     throw new RuntimeException('The deletion staging directory could not be created.');
                 }
-                $stagedPath = $stagingDir . DIRECTORY_SEPARATOR . bin2hex(random_bytes(8)) . '-' . basename($originalPath);
-                if (! rename($originalPath, $stagedPath)) throw new RuntimeException('The asset file could not be staged for deletion.');
+                foreach ($originalPaths as $originalPath) {
+                    $stagedPath = $stagingDir . DIRECTORY_SEPARATOR . bin2hex(random_bytes(8)) . '-' . basename($originalPath);
+                    if (! rename($originalPath, $stagedPath)) throw new RuntimeException('An asset revision file could not be staged for deletion.');
+                    $stagedFiles[] = ['original' => $originalPath, 'staged' => $stagedPath];
+                }
             }
 
             $db->transBegin();
@@ -355,17 +508,25 @@ class AssetController extends BaseController
             $transactionStarted = false;
         } catch (Throwable $exception) {
             if ($transactionStarted) $db->transRollback();
-            if ($stagedPath !== null && is_file($stagedPath) && $originalPath !== null) @rename($stagedPath, $originalPath);
+            foreach (array_reverse($stagedFiles) as $stagedFile) {
+                if (is_file($stagedFile['staged'])) @rename($stagedFile['staged'], $stagedFile['original']);
+            }
             log_message('error', 'Asset deletion failed: {message}', ['message' => $exception->getMessage()]);
             return redirect()->to('/control/assets')->with('error', 'The asset could not be deleted safely.');
         }
 
-        if ($stagedPath !== null && is_file($stagedPath) && ! @unlink($stagedPath)) {
-            log_message('error', 'Deleted asset remains in staging: {path}', ['path' => $stagedPath]);
-            return redirect()->to('/control/assets')->with('error', 'The database record was deleted, but the staged file still requires manual cleanup.');
+        $cleanupFailed = false;
+        foreach ($stagedFiles as $stagedFile) {
+            if (is_file($stagedFile['staged']) && ! @unlink($stagedFile['staged'])) {
+                $cleanupFailed = true;
+                log_message('error', 'Deleted asset revision remains in staging: {path}', ['path' => $stagedFile['staged']]);
+            }
         }
         if ($posterPath !== null && is_file($posterPath) && ! @unlink($posterPath)) {
             log_message('error', 'Deleted asset poster remains on disk: {path}', ['path' => $posterPath]);
+        }
+        if ($cleanupFailed) {
+            return redirect()->to('/control/assets')->with('error', 'The database record was deleted, but one or more staged revision files require manual cleanup.');
         }
         return redirect()->to('/control/assets')->with('success', 'Asset file and database record permanently deleted.');
     }
@@ -385,6 +546,50 @@ class AssetController extends BaseController
         $query = (new AssetModel())->where('public_id', $publicId);
         if ($currentUser->role !== 'admin') $query->where('created_by', $currentUser->id);
         return $query->first();
+    }
+
+    private function currentVersionOrCreate(object $asset): object
+    {
+        $model = new AssetVersionModel();
+        $revision = max(1, (int) $asset->revision);
+        $existing = $model->where('asset_id', $asset->id)->where('revision', $revision)->first();
+        if ($existing !== null) return $existing;
+        $id = $model->insert([
+            'asset_id' => $asset->id, 'revision' => $revision,
+            'filename' => $asset->filename, 'storage_key' => $asset->storage_key,
+            'mime_type' => $asset->mime_type, 'size_bytes' => $asset->size_bytes,
+            'sha256' => $asset->sha256, 'duration_ms' => $asset->duration_ms,
+            'encryption_format' => $asset->encryption_format,
+            'plaintext_size_bytes' => $asset->plaintext_size_bytes,
+            'plaintext_sha256' => $asset->plaintext_sha256,
+            'ldg_chunk_size' => $asset->ldg_chunk_size,
+            'wrapped_dek' => $asset->wrapped_dek,
+            'dek_nonce' => $asset->dek_nonce,
+            'dek_tag' => $asset->dek_tag,
+            'key_version' => $asset->key_version,
+            'encryption_revision' => $asset->encryption_revision,
+            'status' => match ($asset->status) {
+                'active' => 'approved', 'rejected' => 'rejected', 'expired' => 'expired', default => 'draft',
+            },
+            'metadata_snapshot' => $this->versionMetadataSnapshot($asset),
+            'submitted_by' => $asset->created_by, 'reviewed_by' => $asset->reviewed_by,
+            'reviewed_at' => $asset->reviewed_at, 'rejection_reason' => $asset->rejection_reason,
+        ], true);
+        if (! is_int($id)) throw new RuntimeException('Current revision history could not be initialized.');
+        return $model->find($id);
+    }
+
+    /** @param array<string, mixed>|object $source */
+    private function versionMetadataSnapshot(array|object $source): string
+    {
+        $fields = ['title', 'synopsis', 'genre', 'language', 'subtitles', 'age_rating', 'production_year', 'release_date', 'expires_on', 'distributor_company'];
+        $snapshot = [];
+        foreach ($fields as $field) {
+            $value = is_array($source) ? ($source[$field] ?? null) : ($source->{$field} ?? null);
+            if (is_object($value) && method_exists($value, 'format')) $value = $value->format('Y-m-d');
+            $snapshot[$field] = $value;
+        }
+        return json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
     }
 
     /** @return array<string, mixed> */

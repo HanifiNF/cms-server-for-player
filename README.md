@@ -53,7 +53,16 @@ database.default.port = 5432
 database.default.schema = public
 cms.adminApiKey = a_long_random_admin_secret
 cms.enrollmentPepper = a_different_random_secret_with_at_least_32_characters
+ldg.masterKey = base64_encoded_random_32_byte_key
+ldg.chunkSize = 4194304
+ldg.licenseHours = 24
 ```
+
+Generate the LDG master key once with `php -r "echo base64_encode(random_bytes(32)), PHP_EOL;"`.
+Back it up in a secret manager and never commit it. Losing or changing this key
+without a rotation procedure makes existing encrypted assets unusable. A
+development/testing fallback is used when this value is empty, but production
+requires an explicit key.
 
 Create the database with PostgreSQL tooling, then run:
 
@@ -215,6 +224,15 @@ in private CMS storage and served only to an authenticated administrator or the
 distributor who owns the submission. The Assets page includes status totals and
 search/filter controls for status, genre, and distributor.
 
+Rejected submissions use an auditable revision workflow. The distributor may
+edit its metadata and submit a correction with an optional replacement media
+file. The previous revision, checksum, reviewer, and rejection reason remain in
+`asset_versions`; the asset returns to `draft` with an incremented revision
+number. A rejected revision cannot be approved again directly—the distributor
+must create a new Draft revision first. Active and expired films cannot be
+replaced through this workflow. When an asset is permanently deleted, every
+unique revision file is staged and removed together with its catalog record.
+
 An optional valid-through date uses `Asia/Jakarta` calendar time. The film
 remains valid through 23:59:59 on that date. On the next expiry task or Player
 heartbeat, the CMS changes it to `expired`, removes it from manifests and
@@ -232,7 +250,7 @@ within its license window.
 
 Administrators distribute approved films from **Control Center → Assets**:
 
-1. upload a media file to the private CMS storage;
+1. upload a media file; the CMS encrypts it into a private LDG v1 container;
 2. assign it to one or more active Players;
 3. wait for the next Player heartbeat, or use Refresh for an immediate sync;
 4. monitor the assignment status changing from `missing` to `ready`.
@@ -245,13 +263,21 @@ GET  /api/player/assets/{assetPublicId}/download
 POST /api/player/assets/sync
 ```
 
+New uploads and replacement revisions are encrypted as `.ldg` using chunked
+AES-256-GCM. Each film receives a random Data Encryption Key (DEK), while the
+database stores only the DEK wrapped by the CMS master key. The manifest wraps
+the DEK again for the authenticated Player and issues a renewable device
+license. Existing plaintext catalog records remain marked **Legacy Media**
+during rollout and continue to work until they are migrated.
+
 The manifest exposes relative download URLs so Players can use the LAN or
 public CMS hostname they were paired with. Downloads are allowed only for a
 Player that has the specific asset assignment. Uploaded files are stored below
 `writable/uploads/assets`, while posters are stored below
 `writable/uploads/posters`; both are outside the public web root. Set PHP
 `upload_max_filesize` and `post_max_size` above the largest film size before
-uploading production media.
+uploading production media. Production traffic and license delivery must use
+HTTPS.
 
 Authenticated media downloads support single HTTP byte ranges over HTTP or
 HTTPS. The endpoint returns `Accept-Ranges: bytes`, strong SHA-256 `ETag`
@@ -268,11 +294,13 @@ downloads and verifies the file reports the duration back to the catalog.
 
 The Assets upload form submits with upload progress feedback: percentage,
 transferred bytes, current throughput, and estimated time remaining. After the
-network transfer reaches 100%, the UI switches to **Processing media…** while
-the CMS moves the file, hashes it, probes duration, and commits its database
-record. Operators can cancel only during the network-transfer phase. This is a
-single-request upload; interrupted uploads restart from zero until resumable
-chunk uploads are implemented.
+network transfer reaches 100%, the UI switches to **Encrypting media as LDG…**
+while the CMS probes duration, encrypts bounded chunks, hashes the ciphertext,
+and commits its database record. Plaintext is never moved into the asset storage
+directory. Operators can cancel only during the network-transfer phase. This is
+currently a single-request upload; production must set suitable PHP/Apache
+timeouts, and interrupted browser uploads restart from zero until resumable
+chunk uploads or a background upload worker is added.
 
 Asset lifecycle actions are intentionally separate:
 
@@ -333,6 +361,7 @@ The first migration creates:
 - `users`: CMS operators and roles
 - `devices`: registered player PCs and synchronization revisions
 - `assets`: CMS-managed media catalog
+- `asset_versions`: immutable media revision and review history
 - `device_assets`: media inventory reported by each player
 - `schedules`: schedule definitions and recurrence settings
 - `schedule_targets`: target player PCs
