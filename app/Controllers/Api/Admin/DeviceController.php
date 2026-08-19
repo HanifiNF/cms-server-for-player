@@ -98,6 +98,7 @@ class DeviceController extends BaseController
             'last_seen_at'       => $device->last_seen_at?->toDateTimeString(),
             'registered_at'      => $device->registered_at?->toDateTimeString(),
             'inventory_revision' => $device->inventory_revision,
+            'asset_revision'     => $device->asset_revision,
             'schedule_revision'  => $device->schedule_revision,
             'created_at'         => $device->created_at?->toDateTimeString(),
         ];

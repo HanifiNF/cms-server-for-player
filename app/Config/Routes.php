@@ -40,6 +40,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
 $routes->group('control', ['filter' => 'web-assets'], static function (RouteCollection $routes): void {
     $routes->get('assets', 'Web\AssetController::index');
     $routes->post('assets/upload', 'Web\AssetController::upload');
+    $routes->get('assets/(:segment)/poster', 'Web\AssetController::poster/$1');
+    $routes->post('assets/(:segment)/metadata', 'Web\AssetController::updateMetadata/$1');
 });
 $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('health', 'Api\HealthController::index');

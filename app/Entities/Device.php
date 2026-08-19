@@ -14,6 +14,7 @@ class Device extends Entity
 
     protected $casts = [
         'inventory_revision' => 'integer',
+        'asset_revision'     => 'integer',
         'schedule_revision'  => 'integer',
     ];
 }

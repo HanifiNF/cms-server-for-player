@@ -104,6 +104,7 @@ final class WebControlPanelTest extends CIUnitTestCase
             ->postForm('/control/assets/dddddddd-2222-4333-8444-555555555555/assign', ['device_id' => $device->public_id]);
         $assignedAsset->assertRedirectTo('/control/assets');
         $this->assertNotNull((new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id', $catalogAssetId)->first());
+        $this->assertSame(1, (new DeviceModel())->find($device->id)->asset_revision);
         $catalogPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/assets');
         $catalogPage->assertOK();
         $catalogPage->assertSee('CMS Campaign Film');

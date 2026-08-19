@@ -5,6 +5,7 @@ namespace App\Controllers\Api\Player;
 use App\Controllers\BaseController;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
+use App\Libraries\AssetExpiryService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Throwable;
@@ -34,6 +35,7 @@ class HeartbeatController extends BaseController
 
         try {
             $device = $service->authenticate($this->request->getHeaderLine('Authorization'));
+            (new AssetExpiryService())->expireDue();
             $device = $service->heartbeat($device, $input, $this->request->getIPAddress());
         } catch (EnrollmentException $exception) {
             return $this->response->setStatusCode($exception->httpStatus)->setJSON([
@@ -56,6 +58,7 @@ class HeartbeatController extends BaseController
                 'connection_status' => 'online',
                 'server_time'       => gmdate(DATE_ATOM),
                 'inventory_revision'=> $device->inventory_revision,
+                'asset_revision'    => $device->asset_revision,
                 'schedule_revision' => $device->schedule_revision,
             ],
         ]);

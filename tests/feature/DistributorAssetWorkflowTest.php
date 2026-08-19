@@ -18,6 +18,17 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
 
     protected $namespace = 'App';
 
+    /** @var list<string> */
+    private array $temporaryFiles = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->temporaryFiles as $path) {
+            if (is_file($path)) unlink($path);
+        }
+        parent::tearDown();
+    }
+
     public function testDistributorLoginAndWebAccessAreRestrictedToOwnedAssets(): void
     {
         $fixture = $this->fixture();
@@ -118,6 +129,96 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $data = json_decode($manifest->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
         $this->assertCount(1, $data);
         $this->assertSame($assetTwo->public_id, $data[0]['id']);
+    }
+
+    public function testDistributorCanEditOwnedDraftMetadataButNotAnotherOrApprovedFilm(): void
+    {
+        $fixture = $this->fixture();
+        $expiresOn = (new \DateTimeImmutable('now', new \DateTimeZone('Asia/Jakarta')))->modify('+30 days')->format('Y-m-d');
+        $metadata = [
+            'title' => 'Owned Film Updated',
+            'synopsis' => 'A distributor-owned film prepared for administrator review.',
+            'genre' => 'Drama',
+            'language' => 'Indonesian',
+            'subtitles' => 'English',
+            'age_rating' => '13+',
+            'production_year' => '2026',
+            'release_date' => '2026-09-01',
+            'expires_on' => $expiresOn,
+            'distributor_company' => 'Studio Satu',
+        ];
+
+        $updated = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/metadata', $metadata);
+        $updated->assertRedirectTo('/control/assets');
+        $assetOne = (new AssetModel())->find($fixture['assetOne']->id);
+        $this->assertSame('Owned Film Updated', $assetOne->title);
+        $this->assertSame('Drama', $assetOne->genre);
+        $this->assertSame('13+', $assetOne->age_rating);
+        $this->assertSame(2026, $assetOne->production_year);
+        $this->assertSame('2026-09-01', $assetOne->release_date->format('Y-m-d'));
+        $this->assertSame($expiresOn, $assetOne->expires_on->format('Y-m-d'));
+
+        $foreignUpdate = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->postForm('/control/assets/' . $fixture['assetTwo']->public_id . '/metadata', [
+                ...$metadata, 'title' => 'Unauthorized Rename',
+            ]);
+        $foreignUpdate->assertRedirectTo('/control/assets');
+        $this->assertSame('Distributor Two Draft', (new AssetModel())->find($fixture['assetTwo']->id)->title);
+
+        $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/approve', []);
+        $approvedUpdate = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/metadata', [
+                ...$metadata, 'title' => 'Changed After Approval',
+            ]);
+        $approvedUpdate->assertRedirectTo('/control/assets');
+        $this->assertSame('Owned Film Updated', (new AssetModel())->find($fixture['assetOne']->id)->title);
+
+        $invalidRating = $this->withSession(['cms_web_user_id' => $fixture['distributorTwoId']])
+            ->postForm('/control/assets/' . $fixture['assetTwo']->public_id . '/metadata', [
+                ...$metadata, 'title' => 'Still Original', 'age_rating' => 'UNRESTRICTED',
+            ]);
+        $invalidRating->assertRedirectTo('/control/assets');
+        $this->assertSame('Distributor Two Draft', (new AssetModel())->find($fixture['assetTwo']->id)->title);
+    }
+
+    public function testAssetCatalogFiltersAndPrivatePosterRespectDistributorOwnership(): void
+    {
+        $fixture = $this->fixture();
+        $assets = new AssetModel();
+        $assets->update($fixture['assetOne']->id, [
+            'genre' => 'Animation', 'distributor_company' => 'Jakarta Pictures',
+        ]);
+        $assets->update($fixture['assetTwo']->id, [
+            'genre' => 'Horror', 'distributor_company' => 'Bandung Films',
+        ]);
+
+        $filtered = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->get('/control/assets?q=Jakarta&status=draft&genre=Animation&distributor=' . $fixture['distributorOneId']);
+        $filtered->assertOK();
+        $filtered->assertSee('Distributor One Draft');
+        $filtered->assertDontSee('Distributor Two Draft');
+        $filtered->assertSee('Jakarta Pictures');
+
+        $posterDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'posters';
+        if (! is_dir($posterDir)) mkdir($posterDir, 0775, true);
+        $posterPath = $posterDir . DIRECTORY_SEPARATOR . 'workflow-private-poster.jpg';
+        file_put_contents($posterPath, "\xFF\xD8\xFF\xD9");
+        $this->temporaryFiles[] = $posterPath;
+        $assets->update($fixture['assetOne']->id, [
+            'poster_storage_key' => 'posters/workflow-private-poster.jpg',
+            'poster_filename' => 'poster.jpg', 'poster_mime_type' => 'image/jpeg',
+        ]);
+
+        $ownerPoster = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->get('/control/assets/' . $fixture['assetOne']->public_id . '/poster');
+        $ownerPoster->assertStatus(200);
+        $ownerPoster->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $foreignPoster = $this->withSession(['cms_web_user_id' => $fixture['distributorTwoId']])
+            ->get('/control/assets/' . $fixture['assetOne']->public_id . '/poster');
+        $foreignPoster->assertStatus(404);
     }
 
     /** @return array<string, mixed> */

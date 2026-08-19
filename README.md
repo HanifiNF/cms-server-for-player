@@ -206,15 +206,35 @@ reject them with a review reason. Review metadata records the administrator
 and review time. Administrator uploads remain immediately `active` for
 backward compatibility.
 
-Only `active` assets may be assigned, downloaded by a Player, or selected for a
-schedule. Draft and rejected records remain private CMS submissions and are
-never included in the Player manifest.
+The catalog also records optional film metadata: poster, synopsis, genre,
+language, subtitles, age rating, production year, release date, valid-through
+date, and distributor
+company. A distributor may correct metadata while a submission is `draft` or
+`rejected`; after approval, only an administrator may edit it. Posters are kept
+in private CMS storage and served only to an authenticated administrator or the
+distributor who owns the submission. The Assets page includes status totals and
+search/filter controls for status, genre, and distributor.
+
+An optional valid-through date uses `Asia/Jakarta` calendar time. The film
+remains valid through 23:59:59 on that date. On the next expiry task or Player
+heartbeat, the CMS changes it to `expired`, removes it from manifests and
+schedules, changes every assignment to `removal_pending`, and increments the
+affected Player asset and schedule revisions. The private CMS source file is
+retained for audit; only Player copies are removed automatically. An offline
+Player processes the pending removal after it reconnects.
+
+Only `active` and unexpired assets may be assigned, downloaded by a Player, or
+selected for a schedule. Draft, rejected, and expired records remain private
+CMS submissions and are never included in the Player manifest. Schedule
+validation rejects a one-time occurrence that crosses an asset deadline and
+requires recurring schedules containing an expiring film to have an end date
+within its license window.
 
 Administrators distribute approved films from **Control Center → Assets**:
 
 1. upload a media file to the private CMS storage;
 2. assign it to one or more active Players;
-3. refresh the Player, or wait for its first heartbeat after startup;
+3. wait for the next Player heartbeat, or use Refresh for an immediate sync;
 4. monitor the assignment status changing from `missing` to `ready`.
 
 Player-only endpoints use the long-lived device Bearer token:
@@ -228,7 +248,8 @@ POST /api/player/assets/sync
 The manifest exposes relative download URLs so Players can use the LAN or
 public CMS hostname they were paired with. Downloads are allowed only for a
 Player that has the specific asset assignment. Uploaded files are stored below
-`writable/uploads/assets`, outside the public web root. Set PHP
+`writable/uploads/assets`, while posters are stored below
+`writable/uploads/posters`; both are outside the public web root. Set PHP
 `upload_max_filesize` and `post_max_size` above the largest film size before
 uploading production media.
 
@@ -257,15 +278,24 @@ Asset lifecycle actions are intentionally separate:
 
 - **Unassign** removes the CMS assignment but retains the Player's verified
   local cache.
-- **Unassign & Remove** records a pending removal. On its next startup or
-  manual refresh, the Player deletes the managed file only when VLC is not
+- **Unassign & Remove** records a pending removal. On its next heartbeat,
+  startup, or manual refresh, the Player deletes the managed file only when VLC is not
   using it, then acknowledges completion to the CMS.
 - **Delete Asset** permanently deletes the private CMS upload and its database
   record. It is blocked while any Player assignment, pending removal, or
   schedule reference exists.
 
-Because the Socket.IO gateway is not enabled yet, offline or running Players
-receive removal requests through the regular startup/manual-refresh flow.
+Because the Socket.IO gateway is not enabled yet, running Players compare
+`asset_revision` and `schedule_revision` on every ten-second heartbeat. This
+delivers assignments, schedule changes, and removal requests automatically.
+Manual refresh remains available for an immediate check.
+
+Production deployments should also run the idempotent expiry command every
+minute through cron or Windows Task Scheduler:
+
+```text
+php spark assets:expire
+```
 
 ## Schedule management
 
@@ -282,7 +312,7 @@ increments `devices.schedule_revision` after every create,
 update, enable/disable, or delete operation.
 
 Until Socket.IO is enabled, the Player retrieves the authoritative snapshot on
-startup and manual refresh:
+startup, when heartbeat revisions change, and on manual refresh:
 
 ```text
 GET /api/player/schedules

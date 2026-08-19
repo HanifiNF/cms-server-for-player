@@ -4,6 +4,7 @@ namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
 use App\Libraries\ScheduleService;
+use App\Libraries\AssetExpiryService;
 use App\Libraries\ScheduleValidationException;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
@@ -15,6 +16,7 @@ class ScheduleController extends BaseController
 {
     public function index(): string
     {
+        (new AssetExpiryService())->expireDue();
         $service = new ScheduleService();
         $editId = trim((string) $this->request->getGet('edit'));
         $editing = $editId !== '' ? $service->findForWeb($editId) : null;
@@ -38,7 +40,7 @@ class ScheduleController extends BaseController
     {
         try {
             (new ScheduleService())->create($this->payload(), (int) session()->get('cms_web_user_id'));
-            return redirect()->to('/control/schedules')->with('success', 'Schedule created. Refresh the Player to synchronize it.');
+            return redirect()->to('/control/schedules')->with('success', 'Schedule created. The Player will synchronize it automatically.');
         } catch (ScheduleValidationException $error) {
             return redirect()->back()->withInput()->with('errors', $error->errors);
         } catch (Throwable $error) {
@@ -51,7 +53,7 @@ class ScheduleController extends BaseController
     {
         try {
             (new ScheduleService())->update($publicId, $this->payload(), (int) session()->get('cms_web_user_id'));
-            return redirect()->to('/control/schedules')->with('success', 'Schedule updated. Refresh the Player to synchronize the revision.');
+            return redirect()->to('/control/schedules')->with('success', 'Schedule updated. The Player will synchronize the revision automatically.');
         } catch (ScheduleValidationException $error) {
             return redirect()->back()->withInput()->with('errors', $error->errors);
         } catch (Throwable $error) {
@@ -76,7 +78,7 @@ class ScheduleController extends BaseController
     {
         try {
             (new ScheduleService())->delete($publicId);
-            return redirect()->to('/control/schedules')->with('success', 'Schedule deleted. Refresh the Player to remove it from local cache.');
+            return redirect()->to('/control/schedules')->with('success', 'Schedule deleted. The Player will remove it from local cache automatically.');
         } catch (Throwable) {
             return redirect()->to('/control/schedules')->with('error', 'The schedule could not be deleted.');
         }

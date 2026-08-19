@@ -4,6 +4,7 @@ namespace App\Controllers\Api\Player;
 
 use App\Controllers\BaseController;
 use App\Libraries\AssetInventoryService;
+use App\Libraries\AssetExpiryService;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Models\AssetModel;
@@ -26,6 +27,7 @@ class AssetController extends BaseController
                 'error' => ['code' => $exception->errorCode, 'message' => $exception->getMessage()],
             ]);
         }
+        (new AssetExpiryService())->expireDue();
 
         $input = $this->request->getJSON(true) ?? [];
         $assets = $input['assets'] ?? null;
@@ -82,6 +84,7 @@ class AssetController extends BaseController
         } catch (EnrollmentException $exception) {
             return $this->authenticationError($exception);
         }
+        (new AssetExpiryService())->expireDue();
 
         $assignments = (new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id !=', null)->findAll();
         $assets = [];
@@ -111,6 +114,7 @@ class AssetController extends BaseController
         } catch (EnrollmentException $exception) {
             return $this->authenticationError($exception);
         }
+        (new AssetExpiryService())->expireDue();
         $items = [];
         $assetModel = new AssetModel();
         foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'removal_pending')->findAll() as $assignment) {
@@ -150,10 +154,12 @@ class AssetController extends BaseController
         } catch (EnrollmentException $exception) {
             return $this->authenticationError($exception);
         }
+        (new AssetExpiryService())->expireDue();
 
         $asset = (new AssetModel())->where('public_id', $publicId)->where('status', 'active')->first();
         if ($asset === null) return $this->assetNotFound();
-        $assignment = (new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id', $asset->id)->first();
+        $assignment = (new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id', $asset->id)
+            ->where('status !=', 'removal_pending')->first();
         if ($assignment === null) return $this->assetNotFound();
 
         $storageRoot = realpath(WRITEPATH . 'uploads');

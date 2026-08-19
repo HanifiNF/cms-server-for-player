@@ -8,6 +8,13 @@
       <?= csrf_field() ?>
       <label>Media file<input id="assetUploadFile" type="file" name="media" accept="video/*,.mkv,.ts" required></label>
       <label>Title <span class="muted">(optional)</span><input type="text" name="title" maxlength="255" value="<?= esc(old('title')) ?>" placeholder="Uses the filename when empty"></label>
+      <label>Poster <span class="muted">(optional, max 10 MB)</span><input type="file" name="poster" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label>
+      <label>Synopsis <span class="muted">(optional)</span><textarea name="synopsis" maxlength="5000" rows="4" placeholder="Short film synopsis"><?= esc(old('synopsis')) ?></textarea></label>
+      <div class="film-field-pair"><label>Genre<input name="genre" maxlength="120" value="<?= esc(old('genre')) ?>" placeholder="Drama, Action"></label><label>Language<input name="language" maxlength="80" value="<?= esc(old('language')) ?>" placeholder="Indonesian"></label></div>
+      <div class="film-field-pair"><label>Subtitles<input name="subtitles" maxlength="160" value="<?= esc(old('subtitles')) ?>" placeholder="English, Indonesian"></label><label>Age rating<select name="age_rating"><option value="">Not specified</option><?php foreach (['SU', '13+', '17+', '21+'] as $rating): ?><option value="<?= $rating ?>" <?= old('age_rating') === $rating ? 'selected' : '' ?>><?= $rating ?></option><?php endforeach ?></select></label></div>
+      <div class="film-field-pair"><label>Production year<input type="number" name="production_year" min="1888" max="<?= date('Y') + 2 ?>" value="<?= esc(old('production_year')) ?>" placeholder="<?= date('Y') ?>"></label><label>Release date<input type="date" name="release_date" value="<?= esc(old('release_date')) ?>"></label></div>
+      <label>Valid until <span class="muted">(optional, Asia/Jakarta)</span><input type="date" name="expires_on" min="<?= esc($catalogToday) ?>" value="<?= esc(old('expires_on')) ?>"><small class="muted">The film expires after 23:59:59 on this date.</small></label>
+      <label>Distributor company<input name="distributor_company" maxlength="180" value="<?= esc(old('distributor_company')) ?>" placeholder="Company or studio name"></label>
       <button id="assetUploadButton" class="btn primary" type="submit">Upload asset</button>
     </form>
     <div id="assetUploadProgress" class="asset-upload-progress" hidden aria-live="polite">
@@ -21,15 +28,32 @@
   </article>
 
   <section>
+    <div class="asset-catalog-stats">
+      <article><span>TOTAL</span><strong><?= (int) $statusCounts['total'] ?></strong></article>
+      <article><span>DRAFT</span><strong><?= (int) $statusCounts['draft'] ?></strong></article>
+      <article><span>ACTIVE</span><strong><?= (int) $statusCounts['active'] ?></strong></article>
+      <article><span>REJECTED</span><strong><?= (int) $statusCounts['rejected'] ?></strong></article>
+      <article><span>EXPIRED</span><strong><?= (int) $statusCounts['expired'] ?></strong></article>
+    </div>
+    <form method="get" action="<?= site_url('control/assets') ?>" class="catalog-filters">
+      <label>Search<input type="search" name="q" value="<?= esc($filters['q']) ?>" placeholder="Title, filename, genre, or company"></label>
+      <label>Status<select name="status"><option value="">All statuses</option><?php foreach (['draft' => 'Draft', 'active' => 'Active', 'rejected' => 'Rejected', 'expired' => 'Expired'] as $value => $label): ?><option value="<?= $value ?>" <?= $filters['status'] === $value ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select></label>
+      <label>Genre<select name="genre"><option value="">All genres</option><?php foreach ($genres as $genre): ?><option value="<?= esc($genre) ?>" <?= $filters['genre'] === $genre ? 'selected' : '' ?>><?= esc($genre) ?></option><?php endforeach ?></select></label>
+      <?php if ($isAdmin): ?><label>Distributor<select name="distributor"><option value="0">All distributors</option><?php foreach ($distributors as $distributor): ?><option value="<?= (int) $distributor->id ?>" <?= (int) $filters['distributor'] === (int) $distributor->id ? 'selected' : '' ?>><?= esc($distributor->name) ?></option><?php endforeach ?></select></label><?php endif ?>
+      <div class="catalog-filter-actions"><button class="btn primary" type="submit">Apply filters</button><a class="btn ghost" href="<?= site_url('control/assets') ?>">Reset</a></div>
+    </form>
     <div class="section-heading"><div><p><?= $isAdmin ? 'REMOTE DISTRIBUTION' : 'DISTRIBUTOR CATALOG' ?></p><h2><?= $isAdmin ? 'All submitted assets' : 'Your submitted films' ?></h2></div><span class="badge"><?= count($assets) ?> assets</span></div>
     <?php if ($assets === []): ?>
       <article class="card empty-state"><strong>No media assets yet</strong><p><?= $isAdmin ? 'Upload the first film to begin distributing it.' : 'Upload your first film for administrator review.' ?></p></article>
     <?php endif ?>
     <div class="catalog-list">
-      <?php foreach ($assets as $asset): $assetAssignments = $assignments[(int) $asset->id] ?? []; ?>
+      <?php foreach ($assets as $asset): $assetAssignments = $assignments[(int) $asset->id] ?? []; $expiresOn = $asset->expires_on ? $asset->expires_on->format('Y-m-d') : null; $expiryDays = $expiresOn ? (int) ((strtotime($expiresOn) - strtotime($catalogToday)) / 86400) : null; ?>
         <article class="card catalog-card">
           <div class="catalog-head">
-            <div><p>ASSET</p><h3><?= esc($asset->title) ?></h3><small><?= esc($asset->filename) ?></small></div>
+            <div class="catalog-title-group">
+              <?php if ($asset->poster_storage_key): ?><img class="asset-poster" src="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/poster') ?>?v=<?= rawurlencode((string) $asset->updated_at) ?>" alt="Poster <?= esc($asset->title) ?>"><?php else: ?><span class="asset-poster placeholder">NO POSTER</span><?php endif ?>
+              <div><p>ASSET</p><h3><?= esc($asset->title) ?></h3><small><?= esc($asset->filename) ?></small><?php if ($asset->distributor_company): ?><em><?= esc($asset->distributor_company) ?></em><?php endif ?></div>
+            </div>
             <span class="badge asset-status <?= esc($asset->status) ?>"><?= esc(strtoupper($asset->status)) ?></span>
           </div>
           <dl class="asset-facts">
@@ -37,6 +61,17 @@
             <div><dt>Duration</dt><dd><?= (int) $asset->duration_ms > 0 ? gmdate('H:i:s', (int) floor(((int) $asset->duration_ms) / 1000)) : 'Detecting…' ?></dd></div>
             <div><dt>SHA-256</dt><dd><code title="<?= esc($asset->sha256) ?>"><?= esc(substr($asset->sha256, 0, 16)) ?>…</code></dd></div>
           </dl>
+          <div class="film-metadata-grid">
+            <span><small>GENRE</small><strong><?= esc($asset->genre ?: '—') ?></strong></span>
+            <span><small>LANGUAGE</small><strong><?= esc($asset->language ?: '—') ?></strong></span>
+            <span><small>SUBTITLES</small><strong><?= esc($asset->subtitles ?: '—') ?></strong></span>
+            <span><small>AGE RATING</small><strong><?= esc($asset->age_rating ?: '—') ?></strong></span>
+            <span><small>PRODUCTION</small><strong><?= $asset->production_year ? (int) $asset->production_year : '—' ?></strong></span>
+            <span><small>RELEASE DATE</small><strong><?= $asset->release_date ? esc($asset->release_date->format('Y-m-d')) : '—' ?></strong></span>
+            <span><small>VALID UNTIL</small><strong><?= $expiresOn ? esc($expiresOn) : 'No expiry' ?></strong></span>
+          </div>
+          <?php if ($expiresOn): ?><div class="asset-expiry-notice <?= $asset->status === 'expired' ? 'expired' : ($expiryDays !== null && $expiryDays <= 7 ? 'warning' : '') ?>"><strong><?= $asset->status === 'expired' ? 'Expired on ' . esc($expiresOn) : ($expiryDays === 0 ? 'Valid through today' : ($expiryDays === 1 ? 'Expires tomorrow' : 'Expires in ' . (int) $expiryDays . ' days')) ?></strong><span><?= $asset->status === 'expired' ? 'Player assignments are being removed automatically.' : 'Expiration follows Asia/Jakarta time.' ?></span></div><?php endif ?>
+          <?php if ($asset->synopsis): ?><div class="film-synopsis"><small>SYNOPSIS</small><p><?= nl2br(esc($asset->synopsis)) ?></p></div><?php endif ?>
           <div class="asset-review-section">
             <p class="asset-section-label">SUBMISSION DETAILS</p>
             <div class="asset-review-meta">
@@ -45,6 +80,21 @@
               <?php if ($asset->reviewed_at !== null): ?><span><small>REVIEWED AT</small><strong><?= esc($asset->reviewed_at->format('Y-m-d H:i')) ?> UTC</strong></span><?php endif ?>
             </div>
           </div>
+          <?php if ($isAdmin || in_array($asset->status, ['draft', 'rejected'], true)): ?>
+            <details class="asset-metadata-editor"><summary>Edit film metadata</summary>
+              <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/metadata') ?>" enctype="multipart/form-data" class="metadata-edit-form">
+                <?= csrf_field() ?>
+                <label>Title<input name="title" maxlength="255" value="<?= esc($asset->title) ?>" required></label>
+                <label class="wide">Synopsis<textarea name="synopsis" maxlength="5000" rows="4"><?= esc($asset->synopsis) ?></textarea></label>
+                <label>Genre<input name="genre" maxlength="120" value="<?= esc($asset->genre) ?>"></label><label>Language<input name="language" maxlength="80" value="<?= esc($asset->language) ?>"></label>
+                <label>Subtitles<input name="subtitles" maxlength="160" value="<?= esc($asset->subtitles) ?>"></label><label>Age rating<select name="age_rating"><option value="">Not specified</option><?php foreach (['SU', '13+', '17+', '21+'] as $rating): ?><option value="<?= $rating ?>" <?= $asset->age_rating === $rating ? 'selected' : '' ?>><?= $rating ?></option><?php endforeach ?></select></label>
+                <label>Production year<input type="number" name="production_year" min="1888" max="<?= date('Y') + 2 ?>" value="<?= esc($asset->production_year) ?>"></label><label>Release date<input type="date" name="release_date" value="<?= $asset->release_date ? esc($asset->release_date->format('Y-m-d')) : '' ?>"></label>
+                <label>Valid until<input type="date" name="expires_on" min="<?= $asset->status === 'expired' ? '' : esc($catalogToday) ?>" value="<?= $expiresOn ? esc($expiresOn) : '' ?>"></label>
+                <label>Distributor company<input name="distributor_company" maxlength="180" value="<?= esc($asset->distributor_company) ?>"></label><label>Replace poster<input type="file" name="poster" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label>
+                <div class="wide metadata-edit-action"><button class="btn primary" type="submit">Save metadata</button></div>
+              </form>
+            </details>
+          <?php endif ?>
           <?php if ($asset->status === 'rejected' && $asset->rejection_reason): ?><div class="asset-review-note rejected"><strong>Review feedback</strong><p><?= nl2br(esc($asset->rejection_reason)) ?></p></div><?php endif ?>
           <?php if ($isAdmin && in_array($asset->status, ['draft', 'rejected'], true)): ?>
             <div class="asset-approval-zone">

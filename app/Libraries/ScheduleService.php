@@ -29,6 +29,7 @@ class ScheduleService
     /** @return list<array<string, mixed>> */
     public function readyMediaByDevice(): array
     {
+        (new AssetExpiryService($this->db))->expireDue();
         $assetPublicIds = [];
         $activeAssetIds = [];
         foreach ((new AssetModel())->findAll() as $asset) {
@@ -113,10 +114,16 @@ class ScheduleService
 
     public function setEnabled(string $publicId, bool $enabled): void
     {
+        (new AssetExpiryService($this->db))->expireDue();
         $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
         if ($schedule === null) throw new RuntimeException('Schedule was not found.');
         $deviceId = (int) ($this->db->table('schedule_targets')->select('device_id')->where('schedule_id', $schedule->id)->get()->getRowArray()['device_id'] ?? 0);
         if ($enabled) {
+            $unavailableItems = $this->db->table('schedule_items si')->join('assets a', 'a.id = si.asset_id')
+                ->where('si.schedule_id', $schedule->id)->where('a.status !=', 'active')->countAllResults();
+            if ($unavailableItems > 0) {
+                throw new ScheduleValidationException(['status' => 'This schedule contains an expired or inactive film and cannot be enabled.']);
+            }
             $candidate = $this->scheduleArray((int) $schedule->id);
             $conflict = $candidate === null ? null : $this->findConflict($deviceId, $candidate, (int) $schedule->id);
             if ($conflict !== null) {
@@ -157,6 +164,8 @@ class ScheduleService
     /** @return array{revision:int,schedules:list<array<string,mixed>>} */
     public function playerPayload(Device $device): array
     {
+        (new AssetExpiryService($this->db))->expireDue();
+        $device = (new DeviceModel())->find($device->id) ?? $device;
         $rows = $this->db->table('schedules s')
             ->select('s.*')->join('schedule_targets st', 'st.schedule_id = s.id')
             ->where('st.device_id', $device->id)->where('s.status', 'active')
@@ -196,6 +205,8 @@ class ScheduleService
     /** @param array<string, mixed> $input @return array<string, mixed> */
     private function normalize(array $input, ?int $excludeScheduleId = null): array
     {
+        $expiryService = new AssetExpiryService($this->db);
+        $expiryService->expireDue();
         $errors = [];
         $title = trim((string) ($input['title'] ?? ''));
         if ($title === '' || mb_strlen($title) > 255) $errors['title'] = 'Title is required and must not exceed 255 characters.';
@@ -254,6 +265,7 @@ class ScheduleService
             }
         }
         $items = [];
+        $expirationDates = [];
         $totalDurationMs = 0;
         foreach ($keys as $index => $value) {
             $key = trim((string) $value);
@@ -261,6 +273,16 @@ class ScheduleService
             if ($asset === null) {
                 $errors["playlist.{$index}"] = 'A selected media item is no longer Ready on this Player.';
                 continue;
+            }
+            if ($asset->asset_id !== null) {
+                $catalogAsset = (new AssetModel())->find((int) $asset->asset_id);
+                if ($catalogAsset === null || $catalogAsset->status !== 'active') {
+                    $errors["playlist.{$index}"] = 'A selected managed film is expired or no longer active.';
+                    continue;
+                }
+                if ($catalogAsset->expires_on !== null) {
+                    $expirationDates[] = $catalogAsset->expires_on->format('Y-m-d');
+                }
             }
             $duration = filter_var($durations[$index] ?? null, FILTER_VALIDATE_INT);
             $duration = $duration === false ? 0 : (int) $duration;
@@ -287,6 +309,27 @@ class ScheduleService
         }
         $startUtc = $start->setTimezone(new DateTimeZone('UTC'));
         $endUtc = $startUtc->modify('+' . $totalDurationMs . ' milliseconds');
+        if ($expirationDates !== []) {
+            sort($expirationDates);
+            $earliestExpiration = $expirationDates[0];
+            $deadline = $expiryService->deadlineUtc($earliestExpiration);
+            if ($recurrenceType === 'one_time' && $endUtc > $deadline) {
+                throw new ScheduleValidationException(['playlist' => "This schedule ends after a film expires on {$earliestExpiration}."]);
+            }
+            if ($recurrenceType !== 'one_time') {
+                if ($until === null) {
+                    throw new ScheduleValidationException(['recurrence_until' => "A recurring schedule containing an expiring film must end by {$earliestExpiration}."]);
+                }
+                $lastStart = new DateTimeImmutable(
+                    $until->format('Y-m-d') . ' ' . $start->format('H:i:s.u'),
+                    $timezone,
+                );
+                $lastEnd = $lastStart->setTimezone(new DateTimeZone('UTC'))->modify('+' . $totalDurationMs . ' milliseconds');
+                if ($lastEnd > $deadline) {
+                    throw new ScheduleValidationException(['recurrence_until' => "The final occurrence would pass the film expiry date {$earliestExpiration}."]);
+                }
+            }
+        }
         if ($recurrenceType === 'one_time' && $endUtc <= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
             throw new ScheduleValidationException(['start_at' => 'The schedule must end in the future.']);
         }
