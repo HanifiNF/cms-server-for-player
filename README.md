@@ -257,12 +257,16 @@ receive removal requests through the regular startup/manual-refresh flow.
 
 ## Schedule management
 
-Administrators create one-time playlists from **Control Center → Schedules**.
+Administrators create one-time, daily, or weekly playlists from
+**Control Center → Schedules**. Weekly schedules can select multiple weekdays;
+recurring schedules can end on an inclusive local date or continue without an
+end date.
 After selecting a target Player, the media picker contains only inventory items
 that the Player most recently reported as `ready`. Playlist order and each
 item's detected duration can be adjusted. The CMS interprets the chosen wall
-clock time in the Player timezone, stores UTC timestamps, rejects overlaps on
-the same Player, and increments `devices.schedule_revision` after every create,
+clock time in the Player timezone, stores UTC timestamps, rejects occurrence
+overlaps (including recurring-versus-recurring) on the same Player, and
+increments `devices.schedule_revision` after every create,
 update, enable/disable, or delete operation.
 
 Until Socket.IO is enabled, the Player retrieves the authoritative snapshot on

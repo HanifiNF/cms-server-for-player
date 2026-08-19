@@ -22,6 +22,10 @@ class ScheduleController extends BaseController
             $timezone = new DateTimeZone((string) $editing['timezone']);
             $editing['start_local'] = (new DateTimeImmutable((string) $editing['start_at'], new DateTimeZone('UTC')))
                 ->setTimezone($timezone)->format('Y-m-d\TH:i');
+            $config = is_array($editing['recurrence_config'])
+                ? $editing['recurrence_config']
+                : json_decode((string) ($editing['recurrence_config'] ?? ''), true);
+            $editing['recurrence_values'] = is_array($config) ? $config : [];
         }
         return view('web/schedules', [
             'title' => 'Schedules', 'active' => 'schedules', 'admin' => $this->admin(),
@@ -84,6 +88,9 @@ class ScheduleController extends BaseController
         return [
             'title' => $this->request->getPost('title'), 'description' => $this->request->getPost('description'),
             'device_id' => $this->request->getPost('device_id'), 'start_at' => $this->request->getPost('start_at'),
+            'recurrence' => $this->request->getPost('recurrence'),
+            'days_of_week' => $this->request->getPost('days_of_week'),
+            'recurrence_until' => $this->request->getPost('recurrence_until'),
             'priority' => $this->request->getPost('priority'), 'loop_enabled' => $this->request->getPost('loop_enabled'),
             'media_keys' => $this->request->getPost('media_keys'), 'duration_ms' => $this->request->getPost('duration_ms'),
         ];

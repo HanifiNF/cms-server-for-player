@@ -26,7 +26,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
 
         $page = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules');
         $page->assertOK();
-        $page->assertSee('Create a one-time playlist');
+        $page->assertSee('Create a playback schedule');
         $page->assertSee('Local Campaign');
         $page->assertSee('Managed Campaign');
         $page->assertDontSee('Missing Campaign');
@@ -83,6 +83,63 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $deleted->assertRedirectTo('/control/schedules');
         $this->assertNull((new ScheduleModel())->find($schedule->id));
         $this->assertSame(3, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
+    }
+
+    public function testDailyScheduleSurvivesItsFirstOccurrenceAndBlocksFutureConflict(): void
+    {
+        $fixture = $this->fixture();
+        $timezone = new \DateTimeZone('Asia/Jakarta');
+        $start = (new \DateTimeImmutable('yesterday 08:00', $timezone))->format('Y-m-d\TH:i');
+        $until = (new \DateTimeImmutable('+3 days', $timezone))->format('Y-m-d');
+
+        $created = $this->postForm('/control/schedules', [
+            'title' => 'Daily Opening', 'device_id' => $fixture['device']->public_id,
+            'start_at' => $start, 'recurrence' => 'daily', 'recurrence_until' => $until,
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [60000],
+        ], $fixture['adminId']);
+        $created->assertRedirectTo('/control/schedules');
+
+        $schedule = (new ScheduleModel())->where('title', 'Daily Opening')->first();
+        $this->assertNotNull($schedule);
+        $this->assertSame('daily', $schedule->recurrence);
+        $config = json_decode((string) $schedule->recurrence_config, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame($until, $config['until']);
+
+        $snapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules');
+        $snapshot->assertOK();
+        $payload = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $this->assertCount(1, $payload['schedules']);
+        $this->assertSame('daily', $payload['schedules'][0]['recurrence']['freq']);
+        $this->assertSame([], $payload['schedules'][0]['recurrence']['daysOfWeek']);
+        $this->assertStringEndsWith('+07:00', $payload['schedules'][0]['startTime']);
+        $this->assertStringContainsString('T23:59:59+07:00', $payload['schedules'][0]['recurrence']['until']);
+
+        $conflictingStart = (new \DateTimeImmutable('tomorrow 08:00', $timezone))->format('Y-m-d\TH:i');
+        $conflict = $this->postForm('/control/schedules', [
+            'title' => 'One-time Collision', 'device_id' => $fixture['device']->public_id,
+            'start_at' => $conflictingStart, 'recurrence' => 'one_time',
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [30000],
+        ], $fixture['adminId']);
+        $conflict->assertRedirect();
+        $this->assertSame(1, (new ScheduleModel())->countAllResults());
+
+        $tomorrowDay = (int) (new \DateTimeImmutable('tomorrow', $timezone))->format('N');
+        $weeklyConflict = $this->postForm('/control/schedules', [
+            'title' => 'Weekly Collision', 'device_id' => $fixture['device']->public_id,
+            'start_at' => $start, 'recurrence' => 'weekly', 'days_of_week' => [$tomorrowDay],
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [30000],
+        ], $fixture['adminId']);
+        $weeklyConflict->assertRedirect();
+        $this->assertSame(1, (new ScheduleModel())->countAllResults());
+
+        $nonConflictStart = (new \DateTimeImmutable('yesterday 09:00', $timezone))->format('Y-m-d\TH:i');
+        $weekly = $this->postForm('/control/schedules', [
+            'title' => 'Weekly Follow-up', 'device_id' => $fixture['device']->public_id,
+            'start_at' => $nonConflictStart, 'recurrence' => 'weekly', 'days_of_week' => [$tomorrowDay],
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [30000],
+        ], $fixture['adminId']);
+        $weekly->assertRedirectTo('/control/schedules');
+        $this->assertSame(2, (new ScheduleModel())->countAllResults());
     }
 
     /** @return array<string, mixed> */

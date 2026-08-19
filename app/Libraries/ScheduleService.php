@@ -18,10 +18,12 @@ use Throwable;
 class ScheduleService
 {
     private BaseConnection $db;
+    private ScheduleRecurrence $recurrence;
 
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
+        $this->recurrence = new ScheduleRecurrence();
     }
 
     /** @return list<array<string, mixed>> */
@@ -112,11 +114,8 @@ class ScheduleService
         if ($schedule === null) throw new RuntimeException('Schedule was not found.');
         $deviceId = (int) ($this->db->table('schedule_targets')->select('device_id')->where('schedule_id', $schedule->id)->get()->getRowArray()['device_id'] ?? 0);
         if ($enabled) {
-            $conflict = $this->db->table('schedules s')->select('s.title')
-                ->join('schedule_targets st', 'st.schedule_id = s.id')
-                ->where('st.device_id', $deviceId)->where('s.status', 'active')
-                ->where('s.id !=', $schedule->id)->where('s.start_at <', (string) $schedule->end_at)
-                ->where('s.end_at >', (string) $schedule->start_at)->get()->getRowArray();
+            $candidate = $this->scheduleArray((int) $schedule->id);
+            $conflict = $candidate === null ? null : $this->findConflict($deviceId, $candidate, (int) $schedule->id);
             if ($conflict !== null) {
                 throw new ScheduleValidationException(['status' => 'This schedule overlaps "' . $conflict['title'] . '" and cannot be enabled.']);
             }
@@ -158,9 +157,10 @@ class ScheduleService
         $rows = $this->db->table('schedules s')
             ->select('s.*')->join('schedule_targets st', 'st.schedule_id = s.id')
             ->where('st.device_id', $device->id)->where('s.status', 'active')
-            ->where('s.end_at >', gmdate('Y-m-d H:i:s'))->orderBy('s.start_at', 'ASC')->get()->getResultArray();
+            ->orderBy('s.start_at', 'ASC')->get()->getResultArray();
         $schedules = [];
         foreach ($rows as $row) {
+            if ($this->recurrence->isExpired($row)) continue;
             $playlist = [];
             foreach ($this->itemsForSchedule((int) $row['id']) as $item) {
                 $entry = [
@@ -178,9 +178,9 @@ class ScheduleService
                 'title' => $row['title'],
                 'revision' => (int) $row['revision'],
                 'priority' => (int) $row['priority'],
-                'startTime' => $this->utcAtom((string) $row['start_at']),
-                'endTime' => $this->utcAtom((string) $row['end_at']),
-                'recurrence' => null,
+                'startTime' => $this->scheduleAtom($row, 'start_at'),
+                'endTime' => $this->scheduleAtom($row, 'end_at'),
+                'recurrence' => $this->playerRecurrence($row),
                 'enabled' => true,
                 'loop' => (bool) $row['loop_enabled'],
                 'playlist' => $playlist,
@@ -211,6 +211,31 @@ class ScheduleService
         $dateErrors = DateTimeImmutable::getLastErrors();
         if ($start === false || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
             $errors['start_at'] = 'Choose a valid start date and time.';
+        }
+
+        $recurrenceType = strtolower(trim((string) ($input['recurrence'] ?? 'one_time')));
+        if (! in_array($recurrenceType, ['one_time', 'daily', 'weekly'], true)) {
+            $errors['recurrence'] = 'Choose one-time, daily, or weekly.';
+            $recurrenceType = 'one_time';
+        }
+        $daysInput = is_array($input['days_of_week'] ?? null) ? $input['days_of_week'] : [];
+        $daysOfWeek = array_values(array_unique(array_filter(
+            array_map('intval', $daysInput),
+            static fn (int $day): bool => $day >= 1 && $day <= 7
+        )));
+        sort($daysOfWeek);
+        if ($recurrenceType === 'weekly' && $daysOfWeek === []) {
+            $errors['days_of_week'] = 'Choose at least one weekday for a weekly schedule.';
+        }
+        $untilInput = trim((string) ($input['recurrence_until'] ?? ''));
+        $until = null;
+        if ($recurrenceType !== 'one_time' && $untilInput !== '') {
+            $until = DateTimeImmutable::createFromFormat('!Y-m-d', $untilInput, $timezone);
+            $untilErrors = DateTimeImmutable::getLastErrors();
+            if ($until === false || ($untilErrors !== false && ($untilErrors['warning_count'] > 0 || $untilErrors['error_count'] > 0))) {
+                $errors['recurrence_until'] = 'Choose a valid recurrence end date.';
+                $until = null;
+            }
         }
 
         $keys = is_array($input['media_keys'] ?? null) ? array_values($input['media_keys']) : [];
@@ -250,21 +275,30 @@ class ScheduleService
             ];
         }
         if ($totalDurationMs <= 0) $errors['playlist_duration'] = 'The playlist must have a valid total duration.';
+        if ($totalDurationMs > 86400000) $errors['playlist_duration'] = 'A recurring playlist may not exceed 24 hours in total.';
 
         if ($errors !== []) throw new ScheduleValidationException($errors);
+        if ($until !== null && $until->format('Y-m-d') < $start->format('Y-m-d')) {
+            throw new ScheduleValidationException(['recurrence_until' => 'The recurrence end date cannot be before its first occurrence.']);
+        }
         $startUtc = $start->setTimezone(new DateTimeZone('UTC'));
         $endUtc = $startUtc->modify('+' . $totalDurationMs . ' milliseconds');
-        if ($endUtc <= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
+        if ($recurrenceType === 'one_time' && $endUtc <= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
             throw new ScheduleValidationException(['start_at' => 'The schedule must end in the future.']);
         }
 
-        $conflict = $this->db->table('schedules s')->select('s.title')
-            ->join('schedule_targets st', 'st.schedule_id = s.id')
-            ->where('st.device_id', $device->id)->where('s.status', 'active')
-            ->where('s.start_at <', $endUtc->format('Y-m-d H:i:s.u'))
-            ->where('s.end_at >', $startUtc->format('Y-m-d H:i:s.u'));
-        if ($excludeScheduleId !== null) $conflict->where('s.id !=', $excludeScheduleId);
-        $conflictRow = $conflict->get()->getRowArray();
+        $recurrenceConfig = $recurrenceType === 'one_time' ? null : [
+            'daysOfWeek' => $recurrenceType === 'weekly' ? $daysOfWeek : [],
+            'until' => $until?->format('Y-m-d'),
+        ];
+        $candidate = [
+            'start_at' => $startUtc->format('Y-m-d H:i:s.u'),
+            'end_at' => $endUtc->format('Y-m-d H:i:s.u'),
+            'timezone' => $timezoneName,
+            'recurrence' => $recurrenceType,
+            'recurrence_config' => $recurrenceConfig,
+        ];
+        $conflictRow = $this->findConflict((int) $device->id, $candidate, $excludeScheduleId);
         if ($conflictRow !== null) {
             throw new ScheduleValidationException(['start_at' => 'This time overlaps schedule "' . $conflictRow['title'] . '" on the same Player.']);
         }
@@ -273,6 +307,7 @@ class ScheduleService
             'title' => $title, 'description' => trim((string) ($input['description'] ?? '')) ?: null,
             'device' => $device, 'timezone' => $timezoneName,
             'start_at' => $startUtc->format('Y-m-d H:i:s.u'), 'end_at' => $endUtc->format('Y-m-d H:i:s.u'),
+            'recurrence' => $recurrenceType, 'recurrence_config' => $recurrenceConfig,
             'priority' => max(-100, min(100, (int) ($input['priority'] ?? 0))),
             'loop_enabled' => isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1',
             'items' => $items,
@@ -290,7 +325,9 @@ class ScheduleService
             $values = [
                 'public_id' => $publicId, 'title' => $data['title'], 'description' => $data['description'],
                 'start_at' => $data['start_at'], 'end_at' => $data['end_at'], 'timezone' => $data['timezone'],
-                'recurrence' => 'one_time', 'recurrence_config' => null, 'status' => $existingStatus,
+                'recurrence' => $data['recurrence'],
+                'recurrence_config' => $data['recurrence_config'] === null ? null : json_encode($data['recurrence_config'], JSON_THROW_ON_ERROR),
+                'status' => $existingStatus,
                 'priority' => $data['priority'], 'loop_enabled' => $data['loop_enabled'], 'created_by' => $createdBy,
             ];
             $model = new ScheduleModel();
@@ -334,12 +371,64 @@ class ScheduleService
     private function displayStatus(array $schedule): string
     {
         if ($schedule['status'] !== 'active') return 'disabled';
+        if (($schedule['recurrence'] ?? 'one_time') !== 'one_time') {
+            if ($this->recurrence->isExpired($schedule)) return 'completed';
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $occurrences = $this->recurrence->occurrences(
+                $schedule,
+                $now->modify('-1 day'),
+                $now->modify('+1 day')
+            );
+            foreach ($occurrences as $occurrence) {
+                if ($occurrence['start'] <= $now && $occurrence['end'] > $now) return 'active';
+            }
+            return 'upcoming';
+        }
         $now = time();
         $start = strtotime((string) $schedule['start_at'] . ' UTC');
         $end = strtotime((string) $schedule['end_at'] . ' UTC');
         if ($now < $start) return 'upcoming';
         if ($now < $end) return 'active';
         return 'completed';
+    }
+
+    /** @param array<string, mixed> $candidate @return array<string, mixed>|null */
+    private function findConflict(int $deviceId, array $candidate, ?int $excludeScheduleId = null): ?array
+    {
+        $query = $this->db->table('schedules s')->select('s.*')
+            ->join('schedule_targets st', 'st.schedule_id = s.id')
+            ->where('st.device_id', $deviceId)->where('s.status', 'active');
+        if ($excludeScheduleId !== null) $query->where('s.id !=', $excludeScheduleId);
+        foreach ($query->get()->getResultArray() as $existing) {
+            if ($this->recurrence->isExpired($existing)) continue;
+            if ($this->recurrence->overlaps($candidate, $existing)) return $existing;
+        }
+        return null;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function scheduleArray(int $scheduleId): ?array
+    {
+        return $this->db->table('schedules')->where('id', $scheduleId)->get()->getRowArray();
+    }
+
+    /** @param array<string, mixed> $schedule @return array<string, mixed>|null */
+    private function playerRecurrence(array $schedule): ?array
+    {
+        $type = (string) ($schedule['recurrence'] ?? 'one_time');
+        if ($type === 'one_time') return null;
+        $config = $this->recurrence->config($schedule) ?? [];
+        $result = [
+            'freq' => $type,
+            'daysOfWeek' => $type === 'weekly' ? array_values(array_map('intval', (array) ($config['daysOfWeek'] ?? []))) : [],
+        ];
+        if (! empty($config['until'])) {
+            $timezone = new DateTimeZone((string) ($schedule['timezone'] ?: 'Asia/Jakarta'));
+            $result['until'] = (new DateTimeImmutable((string) $config['until'] . ' 23:59:59', $timezone))->format(DATE_ATOM);
+        } else {
+            $result['until'] = null;
+        }
+        return $result;
     }
 
     private function bumpDeviceRevision(int $deviceId): void
@@ -357,9 +446,14 @@ class ScheduleService
         $this->db->transCommit();
     }
 
-    private function utcAtom(string $value): string
+    /** @param array<string, mixed> $schedule */
+    private function scheduleAtom(array $schedule, string $field): string
     {
-        return (new DateTimeImmutable($value, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->format(DATE_ATOM);
+        $utc = new DateTimeImmutable((string) $schedule[$field], new DateTimeZone('UTC'));
+        if (($schedule['recurrence'] ?? 'one_time') === 'one_time') return $utc->setTimezone(new DateTimeZone('UTC'))->format(DATE_ATOM);
+        try { $timezone = new DateTimeZone((string) ($schedule['timezone'] ?: 'Asia/Jakarta')); }
+        catch (Throwable) { $timezone = new DateTimeZone('Asia/Jakarta'); }
+        return $utc->setTimezone($timezone)->format(DATE_ATOM);
     }
 
     private function uuidV4(): string
