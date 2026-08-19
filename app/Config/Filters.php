@@ -4,6 +4,8 @@ namespace Config;
 
 use App\Filters\AdminApiKeyFilter;
 use App\Filters\WebAdminFilter;
+use App\Filters\WebAssetFilter;
+use App\Filters\WebAuthFilter;
 use CodeIgniter\Config\Filters as BaseFilters;
 use CodeIgniter\Filters\Cors;
 use CodeIgniter\Filters\CSRF;
@@ -38,6 +40,8 @@ class Filters extends BaseFilters
         'performance'   => PerformanceMetrics::class,
         'admin-api'     => AdminApiKeyFilter::class,
         'web-admin'     => WebAdminFilter::class,
+        'web-assets'    => WebAssetFilter::class,
+        'web-auth'      => WebAuthFilter::class,
     ];
 
     /**

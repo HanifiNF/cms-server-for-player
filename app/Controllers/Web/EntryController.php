@@ -12,7 +12,12 @@ class EntryController extends BaseController
     {
         $hasAdmin = (new UserModel())->where('role', 'admin')->countAllResults() > 0;
         if (! $hasAdmin) return redirect()->to('/setup');
-        if ((int) session()->get('cms_web_user_id') > 0) return redirect()->to('/control');
+        $userId = (int) session()->get('cms_web_user_id');
+        $user = $userId > 0 ? (new UserModel())->find($userId) : null;
+        if ($user !== null && $user->status === 'active') {
+            if ($user->role === 'distributor') return redirect()->to('/control/assets');
+            if ($user->role === 'admin') return redirect()->to('/control');
+        }
         return redirect()->to('/login');
     }
 }

@@ -7,7 +7,7 @@ use CodeIgniter\Filters\FilterInterface;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;
 
-class WebAdminFilter implements FilterInterface
+class WebAssetFilter implements FilterInterface
 {
     public function before(RequestInterface $request, $arguments = null)
     {
@@ -15,13 +15,12 @@ class WebAdminFilter implements FilterInterface
         $user = $userId > 0 ? (new UserModel())->find($userId) : null;
         if ($user === null || $user->status !== 'active') {
             session()->remove('cms_web_user_id');
-            return redirect()->to('/login')->with('error', 'Sign in with an active administrator account.');
+            return redirect()->to('/login')->with('error', 'Sign in with an active CMS account.');
         }
-        if ($user->role !== 'admin') {
-            return redirect()->to($user->role === 'distributor' ? '/control/assets' : '/login')
-                ->with('error', 'Administrator access is required for that page.');
+        if (! in_array($user->role, ['admin', 'distributor'], true)) {
+            session()->remove('cms_web_user_id');
+            return redirect()->to('/login')->with('error', 'This account cannot access the CMS web portal.');
         }
-
         return null;
     }
 

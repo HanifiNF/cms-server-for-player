@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?= esc($title) ?> · Player CMS</title><link rel="stylesheet" href="<?= base_url('assets/cms.css') ?>"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?= esc($title) ?> · Player CMS</title><link rel="stylesheet" href="<?= base_url('assets/cms.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms.css') ?: 1) ?>"></head>
 <body class="auth-body"><main class="auth-card wide">
   <div class="auth-brand"><span class="brand-icon">▶</span><div><strong>Player CMS</strong><small>FIRST-RUN SETUP</small></div></div>
   <p class="eyebrow">ONE-TIME SETUP</p><h1>Create the administrator</h1><p class="muted">This page becomes unavailable as soon as the first administrator exists.</p>

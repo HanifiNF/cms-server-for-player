@@ -101,7 +101,7 @@ This is a liveness endpoint and intentionally does not query PostgreSQL.
 A readiness endpoint that checks the database and realtime gateway will be
 added when those services are connected.
 
-## Operator authentication and device claim
+## CMS roles, authentication, and device claim
 
 Open `http://localhost:8080`. When no administrator exists, the CMS redirects
 to `/setup` to create the first administrator. That one-time route becomes
@@ -109,7 +109,7 @@ unavailable as soon as an administrator record exists.
 
 After signing in, use the control panel to:
 
-- create, edit, activate, and deactivate operator accounts;
+- create, edit, activate, and deactivate administrator, operator, and distributor accounts;
 - reset passwords and revoke the account's active API sessions;
 - create pending Player records and assign them to an operator;
 - monitor pending, online, and offline Player status.
@@ -120,6 +120,7 @@ generated password is shown once and is never stored in plaintext:
 ```powershell
 php spark user:create admin@example.com "CMS Administrator" admin
 php spark user:create operator@example.com "Lobby Operator" operator
+php spark user:create distributor@example.com "Film Distributor" distributor
 ```
 
 Operator sessions are short-lived, revocable, rate-limited at login, and use
@@ -198,7 +199,18 @@ Only token digests and enrollment-code digests are stored in PostgreSQL.
 
 ## Remote media distribution
 
-Administrators manage films from **Control Center → Assets**:
+Distributors sign in to a restricted Assets-only portal. They see only films
+they uploaded, and every distributor upload starts as `draft`. Administrators
+see submissions from every distributor and may approve them to `active` or
+reject them with a review reason. Review metadata records the administrator
+and review time. Administrator uploads remain immediately `active` for
+backward compatibility.
+
+Only `active` assets may be assigned, downloaded by a Player, or selected for a
+schedule. Draft and rejected records remain private CMS submissions and are
+never included in the Player manifest.
+
+Administrators distribute approved films from **Control Center → Assets**:
 
 1. upload a media file to the private CMS storage;
 2. assign it to one or more active Players;

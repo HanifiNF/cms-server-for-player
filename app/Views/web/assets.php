@@ -3,7 +3,7 @@
 <section class="asset-catalog-grid">
   <article class="card asset-upload-card">
     <div class="section-heading"><div><p>MEDIA CATALOG</p><h2>Upload a film</h2></div></div>
-    <p class="muted">Files are stored privately by the CMS. A Player can download one only after it is assigned.</p>
+    <p class="muted"><?= $isAdmin ? 'Files uploaded by an administrator are immediately active and can be assigned to a Player.' : 'Your upload is stored privately as Draft until an administrator reviews it.' ?></p>
     <form id="assetUploadForm" method="post" action="<?= site_url('control/assets/upload') ?>" enctype="multipart/form-data" class="form-stack">
       <?= csrf_field() ?>
       <label>Media file<input id="assetUploadFile" type="file" name="media" accept="video/*,.mkv,.ts" required></label>
@@ -21,27 +21,45 @@
   </article>
 
   <section>
-    <div class="section-heading"><div><p>REMOTE DISTRIBUTION</p><h2>Available assets</h2></div><span class="badge"><?= count($assets) ?> assets</span></div>
+    <div class="section-heading"><div><p><?= $isAdmin ? 'REMOTE DISTRIBUTION' : 'DISTRIBUTOR CATALOG' ?></p><h2><?= $isAdmin ? 'All submitted assets' : 'Your submitted films' ?></h2></div><span class="badge"><?= count($assets) ?> assets</span></div>
     <?php if ($assets === []): ?>
-      <article class="card empty-state"><strong>No media assets yet</strong><p>Upload the first film to begin distributing it.</p></article>
+      <article class="card empty-state"><strong>No media assets yet</strong><p><?= $isAdmin ? 'Upload the first film to begin distributing it.' : 'Upload your first film for administrator review.' ?></p></article>
     <?php endif ?>
     <div class="catalog-list">
       <?php foreach ($assets as $asset): $assetAssignments = $assignments[(int) $asset->id] ?? []; ?>
         <article class="card catalog-card">
           <div class="catalog-head">
             <div><p>ASSET</p><h3><?= esc($asset->title) ?></h3><small><?= esc($asset->filename) ?></small></div>
-            <span class="badge asset-status ready">ACTIVE</span>
+            <span class="badge asset-status <?= esc($asset->status) ?>"><?= esc(strtoupper($asset->status)) ?></span>
           </div>
           <dl class="asset-facts">
             <div><dt>Size</dt><dd><?= number_format(((int) $asset->size_bytes) / 1048576, 2) ?> MB</dd></div>
             <div><dt>Duration</dt><dd><?= (int) $asset->duration_ms > 0 ? gmdate('H:i:s', (int) floor(((int) $asset->duration_ms) / 1000)) : 'Detecting…' ?></dd></div>
             <div><dt>SHA-256</dt><dd><code title="<?= esc($asset->sha256) ?>"><?= esc(substr($asset->sha256, 0, 16)) ?>…</code></dd></div>
           </dl>
+          <div class="asset-review-section">
+            <p class="asset-section-label">SUBMISSION DETAILS</p>
+            <div class="asset-review-meta">
+              <span><small>UPLOADED BY</small><strong><?= esc($userNames[(int) $asset->created_by] ?? 'Unknown account') ?></strong></span>
+              <?php if ($asset->reviewed_by !== null): ?><span><small>REVIEWED BY</small><strong><?= esc($userNames[(int) $asset->reviewed_by] ?? 'Administrator') ?></strong></span><?php endif ?>
+              <?php if ($asset->reviewed_at !== null): ?><span><small>REVIEWED AT</small><strong><?= esc($asset->reviewed_at->format('Y-m-d H:i')) ?> UTC</strong></span><?php endif ?>
+            </div>
+          </div>
+          <?php if ($asset->status === 'rejected' && $asset->rejection_reason): ?><div class="asset-review-note rejected"><strong>Review feedback</strong><p><?= nl2br(esc($asset->rejection_reason)) ?></p></div><?php endif ?>
+          <?php if ($isAdmin && in_array($asset->status, ['draft', 'rejected'], true)): ?>
+            <div class="asset-approval-zone">
+              <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/approve') ?>"><?= csrf_field() ?><button class="btn primary" type="submit" onclick="return confirm('Approve this film for Player distribution?')">Approve Film</button></form>
+              <?php if ($asset->status === 'draft'): ?><form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/reject') ?>" class="asset-reject-form"><?= csrf_field() ?><label>Rejection reason<textarea name="rejection_reason" maxlength="1000" required placeholder="Explain what the distributor must correct"></textarea></label><button class="btn danger" type="submit">Reject Film</button></form><?php endif ?>
+            </div>
+          <?php elseif (!$isAdmin && $asset->status === 'draft'): ?><div class="asset-review-note"><strong>Waiting for administrator review</strong><p>This film cannot be assigned or downloaded by a Player yet.</p></div><?php endif ?>
+          <?php if ($isAdmin && $asset->status === 'active'): ?>
           <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/assign') ?>" class="asset-assign-form">
             <?= csrf_field() ?>
             <label>Assign to Player<select name="device_id" required><option value="">Choose an active Player</option><?php foreach ($devices as $device): ?><option value="<?= esc($device->public_id) ?>"><?= esc($device->name) ?><?= $device->location ? ' — ' . esc($device->location) : '' ?></option><?php endforeach ?></select></label>
             <button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>>Assign</button>
           </form>
+          <?php endif ?>
+          <?php if ($isAdmin): ?>
           <div class="assignment-list">
             <?php if ($assetAssignments === []): ?><p class="muted">Not assigned to a Player.</p><?php endif ?>
             <?php foreach ($assetAssignments as $assignment): ?>
@@ -57,6 +75,7 @@
             <p><strong>Delete from CMS</strong><small>Permanently removes the uploaded file and database record. All Player assignments must be cleared first.</small></p>
             <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/delete') ?>"><?= csrf_field() ?><button class="btn danger" type="submit" <?= $assetAssignments !== [] ? 'disabled title="Clear all Player assignments first"' : '' ?> onclick="return confirm('Permanently delete this uploaded file and its database record? This cannot be undone.')">Delete Asset</button></form>
           </div>
+          <?php endif ?>
         </article>
       <?php endforeach ?>
     </div>

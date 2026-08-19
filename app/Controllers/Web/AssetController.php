@@ -20,22 +20,31 @@ class AssetController extends BaseController
 
     public function index(): string
     {
-        $assets = (new AssetModel())->where('status', 'active')->orderBy('created_at', 'DESC')->findAll();
-        $devices = (new DeviceModel())->where('status', 'active')->orderBy('name')->findAll();
+        $currentUser = $this->currentUser();
+        $isAdmin = $currentUser->role === 'admin';
+        $assetQuery = (new AssetModel())->orderBy('created_at', 'DESC');
+        if (! $isAdmin) $assetQuery->where('created_by', $currentUser->id);
+        $assets = $assetQuery->findAll();
+        $devices = $isAdmin ? (new DeviceModel())->where('status', 'active')->orderBy('name')->findAll() : [];
         $assignments = [];
         $deviceNames = [];
-        foreach ((new DeviceModel())->findAll() as $device) $deviceNames[(int) $device->id] = ['name' => $device->name, 'public_id' => $device->public_id];
-        foreach ((new DeviceAssetModel())->where('asset_id !=', null)->findAll() as $row) {
-            $assignments[(int) $row->asset_id][] = [
-                'device_id' => (int) $row->device_id,
-                'device_name' => $deviceNames[(int) $row->device_id]['name'] ?? 'Unknown Player',
-                'device_public_id' => $deviceNames[(int) $row->device_id]['public_id'] ?? '',
-                'status' => $row->status,
-            ];
+        if ($isAdmin) {
+            foreach ((new DeviceModel())->findAll() as $device) $deviceNames[(int) $device->id] = ['name' => $device->name, 'public_id' => $device->public_id];
+            foreach ((new DeviceAssetModel())->where('asset_id !=', null)->findAll() as $row) {
+                $assignments[(int) $row->asset_id][] = [
+                    'device_id' => (int) $row->device_id,
+                    'device_name' => $deviceNames[(int) $row->device_id]['name'] ?? 'Unknown Player',
+                    'device_public_id' => $deviceNames[(int) $row->device_id]['public_id'] ?? '',
+                    'status' => $row->status,
+                ];
+            }
         }
+        $userNames = [];
+        foreach ((new UserModel())->findAll() as $user) $userNames[(int) $user->id] = $user->name;
         return view('web/assets', [
-            'title' => 'Assets', 'active' => 'assets', 'admin' => $this->admin(),
+            'title' => 'Assets', 'active' => 'assets', 'admin' => $currentUser,
             'assets' => $assets, 'devices' => $devices, 'assignments' => $assignments,
+            'isAdmin' => $isAdmin, 'userNames' => $userNames,
         ]);
     }
 
@@ -64,12 +73,14 @@ class AssetController extends BaseController
             $sha256 = hash_file('sha256', $storedPath);
             if ($size === false || $size <= 0 || $sha256 === false) throw new \RuntimeException('Uploaded media could not be inspected.');
             $durationMs = (new MediaMetadataService())->detectDurationMs($storedPath);
+            $currentUser = $this->currentUser();
+            $status = $currentUser->role === 'distributor' ? 'draft' : 'active';
             $inserted = (new AssetModel())->insert([
                 'public_id' => $publicId, 'title' => $title, 'filename' => $filename,
                 'storage_key' => 'assets/' . $storedName, 'mime_type' => $mimeType,
                 'size_bytes' => $size, 'sha256' => $sha256,
-                'duration_ms' => $durationMs, 'status' => 'active',
-                'created_by' => (int) session()->get('cms_web_user_id'),
+                'duration_ms' => $durationMs, 'status' => $status,
+                'created_by' => (int) $currentUser->id,
             ], true);
             if ($inserted === false) throw new \RuntimeException('Asset metadata could not be stored.');
         } catch (Throwable $exception) {
@@ -77,9 +88,11 @@ class AssetController extends BaseController
             log_message('error', 'Asset upload failed: {message}', ['message' => $exception->getMessage()]);
             return $this->uploadFailure('The media asset could not be uploaded.', 500);
         }
-        $message = $durationMs > 0
-            ? 'Asset uploaded with automatically detected duration. Assign it to a Player to start remote download.'
-            : 'Asset uploaded. Duration is pending and will be detected by the first Player that downloads it.';
+        $message = $status === 'draft'
+            ? 'Film uploaded as Draft and is waiting for administrator approval.'
+            : ($durationMs > 0
+                ? 'Asset uploaded with automatically detected duration. Assign it to a Player to start remote download.'
+                : 'Asset uploaded. Duration is pending and will be detected by the first Player that downloads it.');
         if ($this->request->isAJAX()) {
             return $this->response->setStatusCode(201)->setJSON([
                 'data' => ['asset_id' => $publicId, 'message' => $message],
@@ -107,6 +120,40 @@ class AssetController extends BaseController
         $saved = $existing ? $model->update($existing->id, $values) : $model->insert($values, false);
         if ($saved === false) return redirect()->to('/control/assets')->with('error', 'The asset assignment could not be saved.');
         return redirect()->to('/control/assets')->with('success', 'Asset assigned. Refresh the Player to begin downloading it.');
+    }
+
+    public function approve(string $publicId): RedirectResponse
+    {
+        $model = new AssetModel();
+        $asset = $model->where('public_id', $publicId)->first();
+        if ($asset === null) return redirect()->to('/control/assets')->with('error', 'Asset was not found.');
+        if (! in_array($asset->status, ['draft', 'rejected'], true)) {
+            return redirect()->to('/control/assets')->with('error', 'Only Draft or Rejected assets can be approved.');
+        }
+        if (! $model->update($asset->id, [
+            'status' => 'active', 'reviewed_by' => $this->currentUser()->id,
+            'reviewed_at' => gmdate('Y-m-d H:i:s'), 'rejection_reason' => null,
+        ])) return redirect()->to('/control/assets')->with('error', 'The asset could not be approved.');
+        return redirect()->to('/control/assets')->with('success', 'Film approved. It can now be assigned to a Player.');
+    }
+
+    public function reject(string $publicId): RedirectResponse
+    {
+        $reason = trim((string) $this->request->getPost('rejection_reason'));
+        if ($reason === '' || mb_strlen($reason) > 1000) {
+            return redirect()->to('/control/assets')->with('error', 'A rejection reason is required and must not exceed 1000 characters.');
+        }
+        $model = new AssetModel();
+        $asset = $model->where('public_id', $publicId)->first();
+        if ($asset === null) return redirect()->to('/control/assets')->with('error', 'Asset was not found.');
+        if ($asset->status !== 'draft') {
+            return redirect()->to('/control/assets')->with('error', 'Only Draft assets can be rejected.');
+        }
+        if (! $model->update($asset->id, [
+            'status' => 'rejected', 'reviewed_by' => $this->currentUser()->id,
+            'reviewed_at' => gmdate('Y-m-d H:i:s'), 'rejection_reason' => $reason,
+        ])) return redirect()->to('/control/assets')->with('error', 'The asset could not be rejected.');
+        return redirect()->to('/control/assets')->with('success', 'Film rejected. The distributor can see the review reason.');
     }
 
     public function unassign(string $publicId, string $devicePublicId): RedirectResponse
@@ -188,7 +235,7 @@ class AssetController extends BaseController
         return $candidate;
     }
 
-    private function admin(): object
+    private function currentUser(): object
     {
         return (new UserModel())->find((int) session()->get('cms_web_user_id'));
     }

@@ -30,14 +30,17 @@ class ScheduleService
     public function readyMediaByDevice(): array
     {
         $assetPublicIds = [];
+        $activeAssetIds = [];
         foreach ((new AssetModel())->findAll() as $asset) {
             $assetPublicIds[(int) $asset->id] = $asset->public_id;
+            if ($asset->status === 'active') $activeAssetIds[(int) $asset->id] = true;
         }
 
         $result = [];
         foreach ((new DeviceModel())->where('status', 'active')->orderBy('name')->findAll() as $device) {
             $media = [];
             foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'ready')->orderBy('title')->findAll() as $item) {
+                if ($item->asset_id !== null && ! isset($activeAssetIds[(int) $item->asset_id])) continue;
                 $durationMs = max(0, (int) $item->duration_ms);
                 if ($durationMs <= 0 || $item->media_key === null || $item->media_key === '') continue;
                 $media[] = [
@@ -163,6 +166,7 @@ class ScheduleService
             if ($this->recurrence->isExpired($row)) continue;
             $playlist = [];
             foreach ($this->itemsForSchedule((int) $row['id']) as $item) {
+                if ($item['asset_id'] !== null && $item['asset_status'] !== 'active') continue;
                 $entry = [
                     'mediaKey' => $item['media_key'],
                     'title' => $item['title_snapshot'],
@@ -362,7 +366,7 @@ class ScheduleService
     private function itemsForSchedule(int $scheduleId): array
     {
         return $this->db->table('schedule_items si')
-            ->select('si.*, a.public_id AS asset_public_id')
+            ->select('si.*, a.public_id AS asset_public_id, a.status AS asset_status')
             ->join('assets a', 'a.id = si.asset_id', 'left')
             ->where('si.schedule_id', $scheduleId)->orderBy('si.position', 'ASC')->get()->getResultArray();
     }

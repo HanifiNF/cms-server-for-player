@@ -12,7 +12,7 @@ class OperatorController extends BaseController
     public function index(): string
     {
         return view('web/operators', [
-            'title' => 'Operators', 'active' => 'operators', 'admin' => $this->admin(),
+            'title' => 'Accounts', 'active' => 'operators', 'admin' => $this->admin(),
             'users' => (new UserModel())->orderBy('created_at', 'DESC')->findAll(),
         ]);
     }
@@ -93,7 +93,7 @@ class OperatorController extends BaseController
         $errors = [];
         if ($data['name'] === '' || mb_strlen($data['name']) > 120) $errors['name'] = 'Name is required and must not exceed 120 characters.';
         if (! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Enter a valid email address.';
-        if (! in_array($data['role'], ['admin', 'operator'], true)) $errors['role'] = 'Choose a valid role.';
+        if (! in_array($data['role'], ['admin', 'operator', 'distributor'], true)) $errors['role'] = 'Choose a valid role.';
         return $errors;
     }
 

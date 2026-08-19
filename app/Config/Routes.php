@@ -10,7 +10,7 @@ $routes->get('setup', 'Web\SetupController::index');
 $routes->post('setup', 'Web\SetupController::create');
 $routes->get('login', 'Web\AuthController::index');
 $routes->post('login', 'Web\AuthController::login');
-$routes->post('logout', 'Web\AuthController::logout', ['filter' => 'web-admin']);
+$routes->post('logout', 'Web\AuthController::logout', ['filter' => 'web-auth']);
 
 $routes->group('control', ['filter' => 'web-admin'], static function (RouteCollection $routes): void {
     $routes->get('/', 'Web\DashboardController::index');
@@ -25,17 +25,21 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('devices/(:segment)/assignment', 'Web\DeviceController::assignment/$1');
     $routes->post('devices/(:segment)/revoke', 'Web\DeviceController::revoke/$1');
     $routes->post('devices/(:segment)/delete', 'Web\DeviceController::delete/$1');
-    $routes->get('assets', 'Web\AssetController::index');
-    $routes->post('assets/upload', 'Web\AssetController::upload');
     $routes->post('assets/(:segment)/assign', 'Web\AssetController::assign/$1');
     $routes->post('assets/(:segment)/unassign/(:segment)', 'Web\AssetController::unassign/$1/$2');
     $routes->post('assets/(:segment)/remove/(:segment)', 'Web\AssetController::unassignAndRemove/$1/$2');
     $routes->post('assets/(:segment)/delete', 'Web\AssetController::delete/$1');
+    $routes->post('assets/(:segment)/approve', 'Web\AssetController::approve/$1');
+    $routes->post('assets/(:segment)/reject', 'Web\AssetController::reject/$1');
     $routes->get('schedules', 'Web\ScheduleController::index');
     $routes->post('schedules', 'Web\ScheduleController::create');
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
     $routes->post('schedules/(:segment)/status', 'Web\ScheduleController::status/$1');
     $routes->post('schedules/(:segment)/delete', 'Web\ScheduleController::delete/$1');
+});
+$routes->group('control', ['filter' => 'web-assets'], static function (RouteCollection $routes): void {
+    $routes->get('assets', 'Web\AssetController::index');
+    $routes->post('assets/upload', 'Web\AssetController::upload');
 });
 $routes->group('api', static function (RouteCollection $routes): void {
     $routes->get('health', 'Api\HealthController::index');

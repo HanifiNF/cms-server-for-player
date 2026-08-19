@@ -1,4 +1,4 @@
-- Distributor role
+- [x] Distributor role
 - UI enhancement
 - Vlc Config Panel
 - add location and change player to studio (1 location many studio)
