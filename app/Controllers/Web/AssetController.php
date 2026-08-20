@@ -8,9 +8,11 @@ use App\Models\AssetVersionModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\UserModel;
+use App\Models\LocationModel;
 use App\Libraries\AssetExpiryService;
 use App\Libraries\MediaMetadataService;
 use App\Libraries\LdgCryptoService;
+use App\Libraries\RealtimeOutboxService;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
@@ -54,7 +56,11 @@ class AssetController extends BaseController
         }
         $genres = array_keys($genres);
         sort($genres, SORT_NATURAL | SORT_FLAG_CASE);
-        $devices = $isAdmin ? (new DeviceModel())->where('status', 'active')->orderBy('name')->findAll() : [];
+        $devices = $isAdmin ? (new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll() : [];
+        if ($isAdmin) {
+            $activeLocationIds = array_map(static fn ($location): int => (int) $location->id, (new LocationModel())->where('status', 'active')->findAll());
+            $devices = array_values(array_filter($devices, static fn ($device): bool => $device->location_id === null || in_array((int) $device->location_id, $activeLocationIds, true)));
+        }
         $assignments = [];
         $deviceNames = [];
         if ($isAdmin) {
@@ -318,7 +324,11 @@ class AssetController extends BaseController
         (new AssetExpiryService())->expireDue();
         $asset = (new AssetModel())->where('public_id', $publicId)->where('status', 'active')->first();
         $device = (new DeviceModel())->where('public_id', trim((string) $this->request->getPost('device_id')))->where('status', 'active')->first();
-        if ($asset === null || $device === null) return redirect()->to('/control/assets')->with('error', 'Choose an active asset and Player.');
+        if ($device !== null && $device->location_id !== null) {
+            $location = (new LocationModel())->find((int) $device->location_id);
+            if ($location === null || $location->status !== 'active') $device = null;
+        }
+        if ($asset === null || $device === null) return redirect()->to('/control/assets')->with('error', 'Choose an active asset and Studio.');
         if ($asset->encryption_format === LdgCryptoService::FORMAT && $device->ldg_version !== LdgCryptoService::FORMAT) {
             return redirect()->to('/control/assets')->with('error', 'This Player must be updated and report LDG v1 support before encrypted films can be assigned.');
         }
@@ -346,7 +356,7 @@ class AssetController extends BaseController
             log_message('error', 'Asset assignment failed: {message}', ['message' => $error->getMessage()]);
             return redirect()->to('/control/assets')->with('error', 'The asset assignment could not be saved.');
         }
-        return redirect()->to('/control/assets')->with('success', 'Asset assigned. The Player will begin downloading it after the next heartbeat.');
+        return redirect()->to('/control/assets')->with('success', 'Asset assigned. The Studio Player will begin downloading it after the next heartbeat.');
     }
 
     public function approve(string $publicId): RedirectResponse
@@ -378,7 +388,7 @@ class AssetController extends BaseController
             $db->transRollback();
             return redirect()->to('/control/assets')->with('error', 'The asset revision could not be approved.');
         }
-        return redirect()->to('/control/assets')->with('success', 'Film approved. It can now be assigned to a Player.');
+        return redirect()->to('/control/assets')->with('success', 'Film approved. It can now be assigned to a Studio.');
     }
 
     public function reject(string $publicId): RedirectResponse
@@ -646,6 +656,7 @@ class AssetController extends BaseController
             ->set('asset_revision', 'asset_revision + 1', false)
             ->set('updated_at', gmdate('Y-m-d H:i:s'))->update();
         if (! $updated) throw new RuntimeException('Player asset revision could not be incremented.');
+        (new RealtimeOutboxService())->queueDevice($deviceId, 'asset.revision.changed');
     }
 
     /** @return array<string, string> */

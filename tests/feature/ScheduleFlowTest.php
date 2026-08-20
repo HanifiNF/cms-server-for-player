@@ -49,6 +49,11 @@ final class ScheduleFlowTest extends CIUnitTestCase
 
         $device = (new DeviceModel())->find($fixture['device']->id);
         $this->assertSame(1, (int) $device->schedule_revision);
+        $outbox = Database::connect()->table('outbox_events')->where('aggregate_id', $device->id)->orderBy('id', 'DESC')->get()->getRowArray();
+        $this->assertSame('schedule.revision.changed', $outbox['event_type']);
+        $outboxPayload = json_decode((string) $outbox['payload'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame($device->public_id, $outboxPayload['device_id']);
+        $this->assertSame(1, $outboxPayload['schedule_revision']);
 
         $unauthorized = $this->get('/api/player/schedules');
         $unauthorized->assertStatus(401);

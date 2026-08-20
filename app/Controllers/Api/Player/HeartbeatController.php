@@ -29,6 +29,15 @@ class HeartbeatController extends BaseController
         if (isset($input['ldg_version']) && ! in_array((string) $input['ldg_version'], ['', LdgCryptoService::FORMAT], true)) {
             $errors['ldg_version'] = 'Unsupported LDG capability.';
         }
+        if (isset($input['playback_state']) && ! in_array((string) $input['playback_state'], ['unknown', 'idle', 'playing', 'paused', 'error'], true)) {
+            $errors['playback_state'] = 'Playback state is invalid.';
+        }
+        if (isset($input['playback_schedule_id']) && mb_strlen((string) $input['playback_schedule_id']) > 36) {
+            $errors['playback_schedule_id'] = 'Playback schedule ID must not exceed 36 characters.';
+        }
+        if (isset($input['playback_error']) && mb_strlen((string) $input['playback_error']) > 500) {
+            $errors['playback_error'] = 'Playback error must not exceed 500 characters.';
+        }
         if ($errors !== []) {
             return $this->response->setStatusCode(422)->setJSON([
                 'error' => ['code' => 'validation_failed', 'message' => 'The request data is invalid.', 'fields' => $errors],
@@ -64,6 +73,7 @@ class HeartbeatController extends BaseController
                 'inventory_revision'=> $device->inventory_revision,
                 'asset_revision'    => $device->asset_revision,
                 'schedule_revision' => $device->schedule_revision,
+                'playback_state'    => $device->playback_state ?: 'unknown',
             ],
         ]);
     }

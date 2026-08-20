@@ -3,6 +3,7 @@
 namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
+use App\Models\DeviceModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
 use Config\Database;
@@ -11,9 +12,24 @@ class OperatorController extends BaseController
 {
     public function index(): string
     {
+        $query = trim((string) $this->request->getGet('q'));
+        $role = trim((string) $this->request->getGet('role'));
+        $status = trim((string) $this->request->getGet('status'));
+        if (! in_array($role, ['', 'admin', 'operator', 'distributor'], true)) $role = '';
+        if (! in_array($status, ['', 'active', 'inactive'], true)) $status = '';
+        $users = new UserModel();
+        if ($query !== '') $users->groupStart()->like('name', $query, 'both', true, true)->orLike('email', $query, 'both', true, true)->groupEnd();
+        if ($role !== '') $users->where('role', $role);
+        if ($status !== '') $users->where('status', $status);
+        $studioCounts = [];
+        foreach ((new DeviceModel())->select('assigned_user_id, COUNT(*) AS studio_count')->where('assigned_user_id IS NOT NULL')->groupBy('assigned_user_id')->findAll() as $row) {
+            $studioCounts[(int) $row->assigned_user_id] = (int) $row->studio_count;
+        }
         return view('web/operators', [
             'title' => 'Accounts', 'active' => 'operators', 'admin' => $this->admin(),
-            'users' => (new UserModel())->orderBy('created_at', 'DESC')->findAll(),
+            'users' => $users->orderBy('created_at', 'DESC')->findAll(),
+            'studioCounts' => $studioCounts,
+            'filters' => ['q' => $query, 'role' => $role, 'status' => $status],
         ]);
     }
 

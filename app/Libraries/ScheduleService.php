@@ -7,6 +7,7 @@ use App\Models\AssetModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\ScheduleModel;
+use App\Models\LocationModel;
 use CodeIgniter\Database\BaseConnection;
 use CodeIgniter\Database\RawSql;
 use Config\Database;
@@ -37,8 +38,10 @@ class ScheduleService
             if ($asset->status === 'active') $activeAssetIds[(int) $asset->id] = true;
         }
 
+        $activeLocationIds = array_map(static fn ($location): int => (int) $location->id, (new LocationModel())->where('status', 'active')->findAll());
         $result = [];
-        foreach ((new DeviceModel())->where('status', 'active')->orderBy('name')->findAll() as $device) {
+        foreach ((new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll() as $device) {
+            if ($device->location_id !== null && ! in_array((int) $device->location_id, $activeLocationIds, true)) continue;
             $media = [];
             foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'ready')->orderBy('title')->findAll() as $item) {
                 if ($item->asset_id !== null && ! isset($activeAssetIds[(int) $item->asset_id])) continue;
@@ -213,7 +216,11 @@ class ScheduleService
 
         $devicePublicId = trim((string) ($input['device_id'] ?? ''));
         $device = (new DeviceModel())->where('public_id', $devicePublicId)->where('status', 'active')->first();
-        if ($device === null) $errors['device_id'] = 'Choose an active Player.';
+        if ($device !== null && $device->location_id !== null) {
+            $location = (new LocationModel())->find((int) $device->location_id);
+            if ($location === null || $location->status !== 'active') $device = null;
+        }
+        if ($device === null) $errors['device_id'] = 'Choose an active Studio.';
         $timezoneName = $device?->timezone ?: 'Asia/Jakarta';
         try {
             $timezone = new DateTimeZone($timezoneName);
@@ -271,7 +278,7 @@ class ScheduleService
             $key = trim((string) $value);
             $asset = $ready[$key] ?? null;
             if ($asset === null) {
-                $errors["playlist.{$index}"] = 'A selected media item is no longer Ready on this Player.';
+                $errors["playlist.{$index}"] = 'A selected media item is no longer Ready on this Studio.';
                 continue;
             }
             if ($asset->asset_id !== null) {
@@ -347,7 +354,7 @@ class ScheduleService
         ];
         $conflictRow = $this->findConflict((int) $device->id, $candidate, $excludeScheduleId);
         if ($conflictRow !== null) {
-            throw new ScheduleValidationException(['start_at' => 'This time overlaps schedule "' . $conflictRow['title'] . '" on the same Player.']);
+            throw new ScheduleValidationException(['start_at' => 'This time overlaps schedule "' . $conflictRow['title'] . '" on the same Studio.']);
         }
 
         return [
@@ -485,6 +492,7 @@ class ScheduleService
             'schedule_revision' => new RawSql('schedule_revision + 1'),
             'updated_at' => gmdate('Y-m-d H:i:s'),
         ]);
+        (new RealtimeOutboxService($this->db))->queueDevice($deviceId, 'schedule.revision.changed');
     }
 
     private function finishTransaction(): void

@@ -21,12 +21,12 @@ if (is_array($oldKeys)) {
 ?>
 <section class="card schedule-editor">
   <div class="card-heading"><div><p><?= $editing ? 'EDIT SCHEDULE' : 'NEW SCHEDULE' ?></p><h2><?= $editing ? esc($editing['title']) : 'Create a playback schedule' ?></h2></div><?php if ($editing): ?><a class="btn ghost" href="<?= site_url('control/schedules') ?>">Cancel edit</a><?php endif ?></div>
-  <?php if ($devices === []): ?><div class="alert error">Create and pair an active Player before adding schedules.</div><?php endif ?>
+  <?php if ($devices === []): ?><div class="alert error">Create and pair an active Studio before adding schedules.</div><?php endif ?>
   <form id="scheduleForm" method="post" action="<?= $editing ? site_url('control/schedules/' . rawurlencode($editing['public_id']) . '/update') : site_url('control/schedules') ?>" class="schedule-form">
     <?= csrf_field() ?>
     <div class="schedule-fields">
       <label>Schedule title<input name="title" value="<?= esc($formTitle) ?>" maxlength="255" placeholder="Morning playlist" required></label>
-      <label>Target Player<select id="scheduleDevice" name="device_id" required><option value="">Choose a Player</option><?php foreach ($devices as $device): ?><option value="<?= esc($device['id']) ?>" <?= $formDevice === $device['id'] ? 'selected' : '' ?>><?= esc($device['name']) ?><?= $device['location'] ? ' — ' . esc($device['location']) : '' ?></option><?php endforeach ?></select></label>
+      <label>Target Studio<select id="scheduleDevice" name="device_id" required><option value="">Choose a Studio</option><?php foreach ($devices as $device): ?><option value="<?= esc($device['id']) ?>" <?= $formDevice === $device['id'] ? 'selected' : '' ?>><?= $device['location'] ? esc($device['location']) . ' — ' : '' ?><?= esc($device['name']) ?></option><?php endforeach ?></select></label>
       <label>Start time <span id="scheduleTimezone" class="field-note"></span><input type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" required></label>
       <label>Priority<input type="number" name="priority" value="<?= esc($formPriority) ?>" min="-100" max="100"></label>
     </div>
@@ -37,10 +37,10 @@ if (is_array($oldKeys)) {
     </div>
     <label>Description (optional)<input name="description" value="<?= esc($formDescription) ?>" maxlength="1000" placeholder="Notes for this playback"></label>
     <div class="playlist-builder">
-      <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on this Player</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
+      <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on this Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
       <div class="playlist-picker"><select id="mediaPicker"><option value="">Select Ready media</option></select><button id="addMedia" type="button" class="btn ghost">Add to playlist</button></div>
       <div id="playlistRows" class="playlist-rows"></div>
-      <div id="playlistEmpty" class="empty">Choose a Player, then add one or more Ready films.</div>
+      <div id="playlistEmpty" class="empty">Choose a Studio, then add one or more Ready films.</div>
     </div>
     <label class="check-row"><input type="checkbox" name="loop_enabled" value="1" <?= (string) old('loop_enabled', !empty($editing['loop_enabled']) ? '1' : '0') === '1' ? 'checked' : '' ?>> Loop playlist until the schedule end time</label>
     <div class="form-action"><button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>><?= $editing ? 'Save schedule' : 'Create schedule' ?></button></div>
@@ -49,7 +49,7 @@ if (is_array($oldKeys)) {
 
 <section class="schedule-list">
   <div class="section-heading"><div><p>DELIVERY PLAN</p><h2>All schedules</h2></div><span class="badge"><?= count($schedules) ?> schedules</span></div>
-  <?php if ($schedules === []): ?><article class="card empty">No schedules yet. Create one above and refresh the target Player.</article><?php endif ?>
+  <?php if ($schedules === []): ?><article class="card empty">No schedules yet. Create one above and refresh the target Studio.</article><?php endif ?>
   <?php foreach ($schedules as $schedule):
     $tz = new DateTimeZone($schedule['timezone']);
     $start = (new DateTimeImmutable($schedule['start_at'], new DateTimeZone('UTC')))->setTimezone($tz);

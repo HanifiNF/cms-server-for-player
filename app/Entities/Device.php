@@ -10,11 +10,13 @@ class Device extends Entity
         'activation_expires_at', 'last_seen_at', 'registered_at',
         'token_last_used_at', 'created_at', 'updated_at',
         'claimed_at',
+        'playback_updated_at',
     ];
 
     protected $casts = [
         'inventory_revision' => 'integer',
         'asset_revision'     => 'integer',
         'schedule_revision'  => 'integer',
+        'location_id'        => '?integer',
     ];
 }

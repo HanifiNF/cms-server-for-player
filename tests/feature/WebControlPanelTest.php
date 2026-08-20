@@ -4,6 +4,7 @@ use App\Models\DeviceModel;
 use App\Models\DeviceAssetModel;
 use App\Models\AssetModel;
 use App\Models\AssetVersionModel;
+use App\Models\LocationModel;
 use App\Models\UserModel;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
@@ -74,19 +75,29 @@ final class WebControlPanelTest extends CIUnitTestCase
         $operatorResponse->assertRedirectTo('/control/operators');
         $operator = (new UserModel())->where('email', 'lobby-operator@example.com')->first();
         $this->assertNotNull($operator);
+        $accountSearch = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/operators?q=Lobby&role=operator&status=active');
+        $accountSearch->assertOK();
+        $accountSearch->assertSee('Lobby Operator');
+        $accountSearch->assertSee('1 accounts');
 
-        $deviceResponse = $this->withSession(['cms_web_user_id' => $adminId])->postForm('/control/devices', [
-            'name' => 'Player Lobby', 'location' => 'Lobby lantai 1',
+        $locationResponse = $this->withSession(['cms_web_user_id' => $adminId])->postForm('/control/locations', [
+            'name' => 'Lobby lantai 1', 'code' => 'LBY1', 'address' => '', 'timezone' => 'Asia/Jakarta',
+        ]);
+        $locationResponse->assertRedirectTo('/control/locations');
+        $location = (new LocationModel())->where('code', 'LBY1')->first();
+        $this->assertNotNull($location);
+        $deviceResponse = $this->withSession(['cms_web_user_id' => $adminId])->postForm('/control/locations/' . $location->public_id . '/studios', [
+            'name' => 'Player Lobby',
             'timezone' => 'Asia/Jakarta', 'assigned_user_id' => $operator->id,
         ]);
-        $deviceResponse->assertRedirectTo('/control/devices');
+        $deviceResponse->assertRedirectTo('/control/locations/' . $location->public_id);
 
         $device = (new DeviceModel())->where('name', 'Player Lobby')->first();
         $this->assertNotNull($device);
         $this->assertSame('pending', $device->status);
         $this->assertSame((int) $operator->id, (int) $device->assigned_user_id);
 
-        $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/devices');
+        $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id);
         $page->assertOK();
         $page->assertSee('Player Lobby');
         $page->assertSee('Lobby Operator');
@@ -161,21 +172,21 @@ final class WebControlPanelTest extends CIUnitTestCase
         $assetPage->assertSee('Media Folder');
 
         $revoked = $this->withSession(['cms_web_user_id' => $adminId])
-            ->postForm('/control/devices/' . $device->public_id . '/revoke', []);
-        $revoked->assertRedirectTo('/control/devices');
+            ->postForm('/control/locations/' . $location->public_id . '/studios/' . $device->public_id . '/revoke', []);
+        $revoked->assertRedirectTo('/control/locations/' . $location->public_id);
         $revokedDevice = (new DeviceModel())->find($device->id);
         $this->assertSame('revoked', $revokedDevice->status);
         $this->assertNull($revokedDevice->device_key_hash);
         $this->assertNull($revokedDevice->fingerprint_hash);
 
-        $revokedPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/devices');
+        $revokedPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id);
         $revokedPage->assertOK();
-        $revokedPage->assertSee('Revoked Players');
-        $revokedPage->assertSee('Delete Permanently');
+        $revokedPage->assertSee('REVOKED');
+        $revokedPage->assertSee('Delete');
 
         $deleted = $this->withSession(['cms_web_user_id' => $adminId])
-            ->postForm('/control/devices/' . $device->public_id . '/delete', []);
-        $deleted->assertRedirectTo('/control/devices');
+            ->postForm('/control/locations/' . $location->public_id . '/studios/' . $device->public_id . '/delete', []);
+        $deleted->assertRedirectTo('/control/locations/' . $location->public_id);
         $this->assertNull((new DeviceModel())->find($device->id));
     }
 

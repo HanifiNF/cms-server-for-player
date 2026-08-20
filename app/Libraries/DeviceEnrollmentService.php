@@ -59,7 +59,13 @@ class DeviceEnrollmentService
         ];
     }
 
-    public function createAssignableDevice(string $name, string $timezone, ?string $location, ?int $assignedUserId): Device
+    public function createAssignableDevice(
+        string $name,
+        string $timezone,
+        ?string $location,
+        ?int $assignedUserId,
+        ?int $locationId = null,
+    ): Device
     {
         $id = $this->devices->insert([
             'public_id'        => $this->uuidV4(),
@@ -67,6 +73,7 @@ class DeviceEnrollmentService
             'status'           => 'pending',
             'timezone'         => $timezone,
             'location'         => $location,
+            'location_id'      => $locationId,
             'assigned_user_id' => $assignedUserId,
         ], true);
         if ($id === false) {
@@ -238,6 +245,13 @@ class DeviceEnrollmentService
             }
         }
 
+        if (isset($metadata['playback_state'])) {
+            $updates['playback_state'] = $metadata['playback_state'];
+            $updates['playback_schedule_id'] = trim((string) ($metadata['playback_schedule_id'] ?? '')) ?: null;
+            $updates['playback_error'] = trim((string) ($metadata['playback_error'] ?? '')) ?: null;
+            $updates['playback_updated_at'] = $this->databaseTime($now);
+        }
+
         if (! $this->devices->update($device->id, $updates)) {
             throw new RuntimeException('The player heartbeat could not be stored.');
         }
@@ -255,10 +269,37 @@ class DeviceEnrollmentService
             'fingerprint_hash'   => null,
             'status'             => 'revoked',
             'token_last_used_at' => $this->databaseTime($this->now()),
+            'playback_state'     => 'unknown',
+            'playback_schedule_id' => null,
+            'playback_error'     => null,
+            'playback_updated_at' => $this->databaseTime($this->now()),
         ]);
 
         if (! $updated) {
             throw new RuntimeException('The player registration could not be revoked.');
+        }
+    }
+
+    public function resetPairing(Device $device): void
+    {
+        $updated = $this->devices->update($device->id, [
+            'device_key_hash'       => null,
+            'fingerprint_hash'      => null,
+            'status'                => 'pending',
+            'claimed_by'            => null,
+            'claimed_at'            => null,
+            'registered_at'         => null,
+            'last_seen_at'          => null,
+            'token_last_used_at'    => null,
+            'ip_address'            => null,
+            'playback_state'        => 'unknown',
+            'playback_schedule_id'  => null,
+            'playback_error'        => null,
+            'playback_updated_at'   => $this->databaseTime($this->now()),
+        ]);
+
+        if (! $updated) {
+            throw new RuntimeException('The Studio pairing could not be reset.');
         }
     }
 

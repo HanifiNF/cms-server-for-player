@@ -3,7 +3,7 @@
 <section class="asset-catalog-grid">
   <article class="card asset-upload-card">
     <div class="section-heading"><div><p>MEDIA CATALOG</p><h2>Upload a film</h2></div></div>
-    <p class="muted"><?= $isAdmin ? 'Files uploaded by an administrator are immediately active and can be assigned to a Player.' : 'Your upload is stored privately as Draft until an administrator reviews it.' ?></p>
+    <p class="muted"><?= $isAdmin ? 'Files uploaded by an administrator are immediately active and can be assigned to a Studio.' : 'Your upload is stored privately as Draft until an administrator reviews it.' ?></p>
     <form id="assetUploadForm" method="post" action="<?= site_url('control/assets/upload') ?>" enctype="multipart/form-data" class="form-stack">
       <?= csrf_field() ?>
       <label>Media file<input id="assetUploadFile" type="file" name="media" accept="video/*,.mkv,.ts" required></label>
@@ -130,13 +130,13 @@
           <?php if ($isAdmin && $asset->status === 'active'): ?>
           <form method="post" action="<?= site_url('control/assets/' . rawurlencode($asset->public_id) . '/assign') ?>" class="asset-assign-form">
             <?= csrf_field() ?>
-            <label>Assign to Player<select name="device_id" required><option value="">Choose an active Player</option><?php foreach ($devices as $device): $incompatible = $asset->encryption_format === 'ldg-v1' && $device->ldg_version !== 'ldg-v1'; ?><option value="<?= esc($device->public_id) ?>" <?= $incompatible ? 'disabled' : '' ?>><?= esc($device->name) ?><?= $device->location ? ' — ' . esc($device->location) : '' ?><?= $incompatible ? ' — Player update required' : '' ?></option><?php endforeach ?></select></label>
+            <label>Assign to Studio<select name="device_id" required><option value="">Choose an active Studio</option><?php foreach ($devices as $device): $incompatible = $asset->encryption_format === 'ldg-v1' && $device->ldg_version !== 'ldg-v1'; ?><option value="<?= esc($device->public_id) ?>" <?= $incompatible ? 'disabled' : '' ?>><?= $device->location ? esc($device->location) . ' — ' : '' ?><?= esc($device->name) ?><?= $incompatible ? ' — Player update required' : '' ?></option><?php endforeach ?></select></label>
             <button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>>Assign</button>
           </form>
           <?php endif ?>
           <?php if ($isAdmin): ?>
           <div class="assignment-list">
-            <?php if ($assetAssignments === []): ?><p class="muted">Not assigned to a Player.</p><?php endif ?>
+            <?php if ($assetAssignments === []): ?><p class="muted">Not assigned to a Studio.</p><?php endif ?>
             <?php foreach ($assetAssignments as $assignment): ?>
               <div><span><strong><?= esc($assignment['device_name']) ?></strong><small class="badge asset-status <?= esc($assignment['status']) ?>"><?= esc(strtoupper(str_replace('_', ' ', $assignment['status']))) ?></small></span>
                 <?php if ($assignment['device_public_id'] !== ''): ?><div class="assignment-actions">

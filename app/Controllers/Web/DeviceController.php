@@ -4,9 +4,11 @@ namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
 use App\Libraries\DeviceEnrollmentService;
+use App\Libraries\LocationService;
 use App\Models\DeviceModel;
 use App\Models\DeviceAssetModel;
 use App\Models\UserModel;
+use App\Models\LocationModel;
 use CodeIgniter\HTTP\RedirectResponse;
 use Config\Player;
 use DateTimeImmutable;
@@ -15,43 +17,15 @@ use Throwable;
 
 class DeviceController extends BaseController
 {
-    public function index(): string
+    public function index(): RedirectResponse
     {
-        $users = (new UserModel())->where('role', 'operator')->where('status', 'active')->orderBy('name')->findAll();
-        $userNames = [];
-        foreach ((new UserModel())->findAll() as $user) $userNames[(int) $user->id] = $user->name;
-        $offlineAfter = config(Player::class)->offlineAfterSeconds;
-        $now = time();
-        $assetCounts = [];
-        foreach ((new DeviceAssetModel())->select('device_id, COUNT(*) AS asset_count')->groupBy('device_id')->findAll() as $row) {
-            $assetCounts[(int) $row->device_id] = (int) $row->asset_count;
-        }
-        $allDevices = array_map(static function ($device) use ($userNames, $offlineAfter, $now, $assetCounts): array {
-            $connection = $device->status;
-            if ($device->status === 'active') {
-                $lastSeen = $device->last_seen_at ? $device->last_seen_at->getTimestamp() : 0;
-                $connection = $lastSeen > 0 && ($now - $lastSeen) <= $offlineAfter ? 'online' : 'offline';
-            }
-            return [
-                'entity' => $device,
-                'connection' => $connection,
-                'assignedName' => $userNames[(int) $device->assigned_user_id] ?? 'Unassigned',
-                'assetCount' => $assetCounts[(int) $device->id] ?? 0,
-            ];
-        }, (new DeviceModel())->orderBy('created_at', 'DESC')->findAll());
-
-        return view('web/devices', [
-            'title' => 'Players', 'active' => 'devices', 'admin' => $this->admin(),
-            'devices' => array_values(array_filter($allDevices, static fn (array $item): bool => $item['entity']->status !== 'revoked')),
-            'revokedDevices' => array_values(array_filter($allDevices, static fn (array $item): bool => $item['entity']->status === 'revoked')),
-            'operators' => $users,
-        ]);
+        return redirect()->to('/control/locations');
     }
 
     public function assets(string $publicId): string|RedirectResponse
     {
         $device = (new DeviceModel())->where('public_id', $publicId)->first();
-        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
 
         $query = mb_strtolower(trim((string) $this->request->getGet('q')));
         $status = trim((string) $this->request->getGet('status'));
@@ -82,8 +56,9 @@ class DeviceController extends BaseController
         usort($assets, static fn ($left, $right): int => strcasecmp($left->title, $right->title) ?: strcasecmp($left->relative_path ?? '', $right->relative_path ?? ''));
 
         return view('web/device_assets', [
-            'title' => 'Player Assets', 'active' => 'devices', 'admin' => $this->admin(),
+            'title' => 'Studio Assets', 'active' => 'locations', 'admin' => $this->admin(),
             'device' => $device, 'assets' => array_slice($assets, 0, 1000),
+            'locationPublicId' => $device->location_id === null ? null : (new LocationModel())->find((int) $device->location_id)?->public_id,
             'summary' => $summary, 'lastSyncedAt' => $lastSyncedAt,
             'filters' => ['q' => (string) $this->request->getGet('q'), 'status' => $status, 'source' => $source],
             'resultCount' => count($assets),
@@ -93,67 +68,93 @@ class DeviceController extends BaseController
     public function create(): RedirectResponse
     {
         $name = trim((string) $this->request->getPost('name'));
-        $location = trim((string) $this->request->getPost('location')) ?: null;
-        $timezone = trim((string) $this->request->getPost('timezone')) ?: 'Asia/Jakarta';
+        $locationPublicId = trim((string) $this->request->getPost('location_id')) ?: null;
+        $legacyLocation = trim((string) $this->request->getPost('location')) ?: null;
+        $timezone = trim((string) $this->request->getPost('timezone'));
         $assignedId = (int) $this->request->getPost('assigned_user_id');
         $assignedId = $assignedId > 0 ? $assignedId : null;
         $errors = [];
         if ($name === '' || mb_strlen($name) > 120) $errors['name'] = 'Name is required and must not exceed 120 characters.';
-        if ($location !== null && mb_strlen($location) > 160) $errors['location'] = 'Location must not exceed 160 characters.';
-        if (! in_array($timezone, DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = 'Timezone is invalid.';
+        if ($locationPublicId === null && $legacyLocation === null) $errors['location_id'] = 'Choose an active Location.';
+        if ($legacyLocation !== null && mb_strlen($legacyLocation) > 160) $errors['location'] = 'Location must not exceed 160 characters.';
+        if ($timezone !== '' && ! in_array($timezone, DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = 'Timezone is invalid.';
         if ($assignedId !== null && ! $this->validOperator($assignedId)) $errors['assigned_user_id'] = 'Choose an active operator.';
         if ($errors !== []) return redirect()->back()->withInput()->with('errors', $errors);
 
         try {
-            (new DeviceEnrollmentService())->createAssignableDevice($name, $timezone, $location, $assignedId);
+            $location = (new LocationService())->findSelection($locationPublicId, $legacyLocation, $timezone ?: 'Asia/Jakarta');
+            if ($location === null || $location->status !== 'active') return redirect()->back()->withInput()->with('error', 'Choose an active Location.');
+            (new DeviceEnrollmentService())->createAssignableDevice(
+                $name, $timezone ?: $location->timezone, $location->name, $assignedId, (int) $location->id,
+            );
         } catch (Throwable $exception) {
             log_message('error', 'Web device creation failed: {message}', ['message' => $exception->getMessage()]);
-            return redirect()->back()->withInput()->with('error', 'The Player record could not be created.');
+            return redirect()->back()->withInput()->with('error', 'The Studio record could not be created.');
         }
-        return redirect()->to('/control/devices')->with('success', 'Player created and ready to be claimed.');
+        return redirect()->to('/control/devices')->with('success', 'Studio created and ready to be claimed by its Player.');
     }
 
     public function assignment(string $publicId): RedirectResponse
     {
         $model = new DeviceModel();
         $device = $model->where('public_id', $publicId)->first();
-        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
-        if (! in_array($device->status, ['pending', 'active'], true)) return redirect()->to('/control/devices')->with('error', 'Revoked Players cannot be reassigned.');
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
+        if (! in_array($device->status, ['pending', 'active'], true)) return redirect()->to('/control/devices')->with('error', 'Revoked Studios cannot be reassigned.');
         $assignedId = (int) $this->request->getPost('assigned_user_id');
         $assignedId = $assignedId > 0 ? $assignedId : null;
         if ($assignedId !== null && ! $this->validOperator($assignedId)) return redirect()->to('/control/devices')->with('error', 'Choose an active operator.');
         $model->update($device->id, ['assigned_user_id' => $assignedId]);
-        return redirect()->to('/control/devices')->with('success', 'Player assignment updated.');
+        return redirect()->to('/control/devices')->with('success', 'Studio assignment updated.');
+    }
+
+    public function details(string $publicId): RedirectResponse
+    {
+        $model = new DeviceModel();
+        $device = $model->where('public_id', $publicId)->first();
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
+        if ($device->status === 'revoked') return redirect()->to('/control/devices')->with('error', 'A revoked Studio cannot be edited.');
+        $name = trim((string) $this->request->getPost('name'));
+        $locationPublicId = trim((string) $this->request->getPost('location_id'));
+        $timezone = trim((string) $this->request->getPost('timezone'));
+        $location = (new LocationModel())->where('public_id', $locationPublicId)->where('status', 'active')->first();
+        if ($name === '' || mb_strlen($name) > 120) return redirect()->to('/control/devices')->with('error', 'Studio name is required and must not exceed 120 characters.');
+        if ($location === null) return redirect()->to('/control/devices')->with('error', 'Choose an active Location.');
+        if ($timezone !== '' && ! in_array($timezone, DateTimeZone::listIdentifiers(), true)) return redirect()->to('/control/devices')->with('error', 'Timezone is invalid.');
+        if (! $model->update($device->id, [
+            'name' => $name, 'location_id' => $location->id, 'location' => $location->name,
+            'timezone' => $timezone ?: $location->timezone,
+        ])) return redirect()->to('/control/devices')->with('error', 'Studio details could not be updated.');
+        return redirect()->to('/control/devices')->with('success', 'Studio details updated. The Player receives them on its next heartbeat.');
     }
 
     public function revoke(string $publicId): RedirectResponse
     {
         $model = new DeviceModel();
         $device = $model->where('public_id', $publicId)->first();
-        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
-        if ($device->status !== 'active') return redirect()->to('/control/devices')->with('error', 'Only an active Player can be revoked.');
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
+        if ($device->status !== 'active') return redirect()->to('/control/devices')->with('error', 'Only an active Studio can be revoked.');
         try {
             (new DeviceEnrollmentService())->revoke($device);
         } catch (Throwable $exception) {
             log_message('error', 'Web Player revoke failed: {message}', ['message' => $exception->getMessage()]);
             return redirect()->to('/control/devices')->with('error', 'The Player could not be revoked.');
         }
-        return redirect()->to('/control/devices')->with('success', 'Player revoked. It will return to pairing when it contacts the CMS.');
+        return redirect()->to('/control/devices')->with('success', 'Studio revoked. Its Player will return to pairing when it contacts the CMS.');
     }
 
     public function delete(string $publicId): RedirectResponse
     {
         $model = new DeviceModel();
         $device = $model->where('public_id', $publicId)->first();
-        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Player was not found.');
-        if ($device->status !== 'revoked') return redirect()->to('/control/devices')->with('error', 'Only a revoked Player can be permanently deleted.');
+        if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
+        if ($device->status !== 'revoked') return redirect()->to('/control/devices')->with('error', 'Only a revoked Studio can be permanently deleted.');
         try {
             if (! $model->delete($device->id)) throw new \RuntimeException('Delete failed.');
         } catch (Throwable $exception) {
             log_message('error', 'Web Player delete failed: {message}', ['message' => $exception->getMessage()]);
             return redirect()->to('/control/devices')->with('error', 'The revoked Player could not be deleted.');
         }
-        return redirect()->to('/control/devices')->with('success', 'Revoked Player permanently deleted.');
+        return redirect()->to('/control/devices')->with('success', 'Revoked Studio permanently deleted.');
     }
 
     private function validOperator(int $id): bool

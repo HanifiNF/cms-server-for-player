@@ -13,7 +13,7 @@ $formatDuration = static function (int $milliseconds): string {
 };
 ?>
 <section class="asset-player-head">
-  <div><a class="back-link" href="<?= site_url('control/devices') ?>">← Back to Players</a><p class="eyebrow">PLAYER INVENTORY</p><h2><?= esc($device->name) ?></h2><span><?= esc($device->location ?: 'No location') ?> · <?= esc($device->public_id) ?></span></div>
+  <div><a class="back-link" href="<?= $locationPublicId ? site_url('control/locations/' . rawurlencode($locationPublicId)) : site_url('control/locations') ?>">← Back to Location</a><p class="eyebrow">STUDIO INVENTORY</p><h2><?= esc($device->name) ?></h2><span><?= esc($device->location ?: 'No Location') ?> · <?= esc($device->public_id) ?></span></div>
   <div class="inventory-meta"><strong>Revision <?= (int) $device->inventory_revision ?></strong><small>Last sync: <?= $lastSyncedAt ? esc($lastSyncedAt->format('Y-m-d H:i:s')) . ' UTC' : 'Never' ?></small></div>
 </section>
 <section class="asset-summary-grid">

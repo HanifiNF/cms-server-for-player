@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Entities\Device;
 use App\Libraries\DeviceEnrollmentService;
 use App\Models\DeviceModel;
+use App\Models\LocationModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Throwable;
@@ -85,10 +86,13 @@ class DeviceController extends BaseController
     private function serializeDevice(Device $device, ?DeviceEnrollmentService $service = null): array
     {
         $service ??= new DeviceEnrollmentService();
+        $location = $device->location_id !== null ? (new LocationModel())->find((int) $device->location_id) : null;
 
         return [
             'id'                 => $device->public_id,
             'name'               => $device->name,
+            'location_id'        => $location?->public_id,
+            'location'           => $location?->name ?? $device->location,
             'status'             => $device->status,
             'connection_status'  => $service->connectionStatus($device),
             'app_version'        => $device->app_version,
@@ -101,6 +105,10 @@ class DeviceController extends BaseController
             'inventory_revision' => $device->inventory_revision,
             'asset_revision'     => $device->asset_revision,
             'schedule_revision'  => $device->schedule_revision,
+            'playback_state'     => $device->playback_state ?: 'unknown',
+            'playback_schedule_id' => $device->playback_schedule_id,
+            'playback_error'     => $device->playback_error,
+            'playback_updated_at'=> $device->playback_updated_at?->toDateTimeString(),
             'created_at'         => $device->created_at?->toDateTimeString(),
         ];
     }

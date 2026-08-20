@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="<?= base_url('assets/cms.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-lifecycle.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-lifecycle.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-schedules.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-schedules.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-locations.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-locations.css') ?: 1) ?>">
 </head>
 <body>
 <div class="app-shell">
@@ -16,7 +17,7 @@
       <?php if ($admin->role === 'admin'): ?>
       <a class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>" href="<?= site_url('control') ?>">⌂ <span>Dashboard</span></a>
       <a class="<?= ($active ?? '') === 'operators' ? 'active' : '' ?>" href="<?= site_url('control/operators') ?>">◎ <span>Accounts</span></a>
-      <a class="<?= ($active ?? '') === 'devices' ? 'active' : '' ?>" href="<?= site_url('control/devices') ?>">▣ <span>Players</span></a>
+      <a class="<?= ($active ?? '') === 'locations' ? 'active' : '' ?>" href="<?= site_url('control/locations') ?>">⌖ <span>Locations</span></a>
       <?php endif ?>
       <a class="<?= ($active ?? '') === 'assets' ? 'active' : '' ?>" href="<?= site_url('control/assets') ?>">◆ <span>Assets</span></a>
       <?php if ($admin->role === 'admin'): ?>
