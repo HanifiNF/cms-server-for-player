@@ -10,6 +10,8 @@ use App\Models\DeviceModel;
 use App\Models\UserModel;
 use App\Models\LocationModel;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\AssetTaxonomyService;
+use App\Models\GenreModel;
 use App\Libraries\MediaMetadataService;
 use App\Libraries\LdgCryptoService;
 use App\Libraries\RealtimeOutboxService;
@@ -26,76 +28,10 @@ class AssetController extends BaseController
     private const AGE_RATINGS = ['SU', '13+', '17+', '21+'];
     private const POSTER_MAX_BYTES = 10485760;
 
-    public function index(): string
+    public function index(): RedirectResponse
     {
-        $expiryService = new AssetExpiryService();
-        $expiryService->expireDue();
-        $currentUser = $this->currentUser();
-        $isAdmin = $currentUser->role === 'admin';
-        $assetQuery = (new AssetModel())->orderBy('created_at', 'DESC');
-        if (! $isAdmin) $assetQuery->where('created_by', $currentUser->id);
-        $scopedAssets = $assetQuery->findAll();
-        $search = trim((string) $this->request->getGet('q'));
-        $statusFilter = trim((string) $this->request->getGet('status'));
-        $genreFilter = trim((string) $this->request->getGet('genre'));
-        $distributorFilter = $isAdmin ? max(0, (int) $this->request->getGet('distributor')) : 0;
-        if (! in_array($statusFilter, ['', 'draft', 'active', 'rejected', 'expired'], true)) $statusFilter = '';
-        $assets = array_values(array_filter($scopedAssets, static function ($asset) use ($search, $statusFilter, $genreFilter, $distributorFilter): bool {
-            if ($statusFilter !== '' && $asset->status !== $statusFilter) return false;
-            if ($genreFilter !== '' && (string) $asset->genre !== $genreFilter) return false;
-            if ($distributorFilter > 0 && (int) $asset->created_by !== $distributorFilter) return false;
-            if ($search === '') return true;
-            $haystack = implode(' ', [(string) $asset->title, (string) $asset->filename, (string) $asset->genre, (string) $asset->distributor_company]);
-            return mb_stripos($haystack, $search) !== false;
-        }));
-        $statusCounts = ['total' => count($scopedAssets), 'draft' => 0, 'active' => 0, 'rejected' => 0, 'expired' => 0];
-        $genres = [];
-        foreach ($scopedAssets as $asset) {
-            if (isset($statusCounts[$asset->status])) $statusCounts[$asset->status]++;
-            if (trim((string) $asset->genre) !== '') $genres[(string) $asset->genre] = true;
-        }
-        $genres = array_keys($genres);
-        sort($genres, SORT_NATURAL | SORT_FLAG_CASE);
-        $devices = $isAdmin ? (new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll() : [];
-        if ($isAdmin) {
-            $activeLocationIds = array_map(static fn ($location): int => (int) $location->id, (new LocationModel())->where('status', 'active')->findAll());
-            $devices = array_values(array_filter($devices, static fn ($device): bool => $device->location_id === null || in_array((int) $device->location_id, $activeLocationIds, true)));
-        }
-        $assignments = [];
-        $deviceNames = [];
-        if ($isAdmin) {
-            foreach ((new DeviceModel())->findAll() as $device) $deviceNames[(int) $device->id] = ['name' => $device->name, 'public_id' => $device->public_id];
-            foreach ((new DeviceAssetModel())->where('asset_id !=', null)->findAll() as $row) {
-                $assignments[(int) $row->asset_id][] = [
-                    'device_id' => (int) $row->device_id,
-                    'device_name' => $deviceNames[(int) $row->device_id]['name'] ?? 'Unknown Player',
-                    'device_public_id' => $deviceNames[(int) $row->device_id]['public_id'] ?? '',
-                    'status' => $row->status,
-                ];
-            }
-        }
-        $userNames = [];
-        $distributors = [];
-        foreach ((new UserModel())->findAll() as $user) {
-            $userNames[(int) $user->id] = $user->name;
-            if ($user->role === 'distributor') $distributors[] = $user;
-        }
-        $versionHistory = [];
-        $scopedAssetIds = array_map(static fn ($asset): int => (int) $asset->id, $scopedAssets);
-        if ($scopedAssetIds !== []) {
-            foreach ((new AssetVersionModel())->whereIn('asset_id', $scopedAssetIds)->orderBy('revision', 'DESC')->findAll() as $version) {
-                $versionHistory[(int) $version->asset_id][] = $version;
-            }
-        }
-        return view('web/assets', [
-            'title' => 'Assets', 'active' => 'assets', 'admin' => $currentUser,
-            'assets' => $assets, 'devices' => $devices, 'assignments' => $assignments,
-            'isAdmin' => $isAdmin, 'userNames' => $userNames,
-            'statusCounts' => $statusCounts, 'genres' => $genres, 'distributors' => $distributors,
-            'catalogToday' => $expiryService->today(),
-            'versionHistory' => $versionHistory,
-            'filters' => ['q' => $search, 'status' => $statusFilter, 'genre' => $genreFilter, 'distributor' => $distributorFilter],
-        ]);
+        $query = trim((string) $this->request->getServer('QUERY_STRING'));
+        return redirect()->to('/control/library' . ($query !== '' ? '?' . $query : ''));
     }
 
     public function upload(): ResponseInterface
@@ -107,7 +43,13 @@ class AssetController extends BaseController
         $filename = basename($file->getClientName());
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         if (! in_array($extension, self::EXTENSIONS, true)) return $this->uploadFailure('The selected file type is not supported.');
+        try {
+            $taxonomyInput = $this->taxonomyInput();
+        } catch (RuntimeException $error) {
+            return $this->uploadFailure($error->getMessage());
+        }
         $metadata = $this->metadataInput(pathinfo($filename, PATHINFO_FILENAME));
+        if ($taxonomyInput['ids'] !== null) $metadata['genre'] = $this->legacyGenreSummary($taxonomyInput['names']);
         $metadataErrors = $this->metadataErrors($metadata);
         if ($metadataErrors !== []) return $this->uploadFailure(reset($metadataErrors));
         if (mb_strlen($filename) > 255) return $this->uploadFailure('The filename is too long.');
@@ -153,6 +95,7 @@ class AssetController extends BaseController
             $db->transBegin();
             $inserted = (new AssetModel())->insert($assetValues, true);
             if (! is_int($inserted)) throw new \RuntimeException('Asset metadata could not be stored.');
+            if ($taxonomyInput['ids'] !== null) (new AssetTaxonomyService($db))->sync($inserted, $taxonomyInput['ids']);
             $versionInserted = (new AssetVersionModel())->insert([
                 'asset_id' => $inserted, 'revision' => 1,
                 'filename' => $filename, 'storage_key' => 'assets/' . $storedName,
@@ -193,7 +136,13 @@ class AssetController extends BaseController
         if ($currentUser->role === 'distributor' && ! in_array($asset->status, ['draft', 'rejected'], true)) {
             return redirect()->to('/control/assets')->with('error', 'Approved film metadata can only be changed by an administrator.');
         }
+        try {
+            $taxonomyInput = $this->taxonomyInput();
+        } catch (RuntimeException $error) {
+            return redirect()->to('/control/assets')->with('error', $error->getMessage());
+        }
         $metadata = $this->metadataInput((string) $asset->title);
+        if ($taxonomyInput['ids'] !== null) $metadata['genre'] = $this->legacyGenreSummary($taxonomyInput['names']);
         $errors = $this->metadataErrors($metadata, $asset->status === 'expired');
         if ($errors !== []) return redirect()->to('/control/assets')->with('errors', $errors);
         $poster = $this->request->getFile('poster');
@@ -213,7 +162,10 @@ class AssetController extends BaseController
                 $metadata['poster_filename'] = $posterInfo['filename'];
                 $metadata['poster_mime_type'] = $posterInfo['mime_type'];
             }
+            $db = Database::connect();
+            $db->transBegin();
             if (! (new AssetModel())->update($asset->id, $metadata)) throw new RuntimeException('Metadata could not be saved.');
+            if ($taxonomyInput['ids'] !== null) (new AssetTaxonomyService($db))->sync((int) $asset->id, $taxonomyInput['ids']);
             if ($asset->status === 'draft') {
                 $version = $this->currentVersionOrCreate($asset);
                 if (! (new AssetVersionModel())->update($version->id, [
@@ -221,7 +173,10 @@ class AssetController extends BaseController
                 ])) throw new RuntimeException('Draft revision metadata could not be saved.');
             }
             Database::connect()->table('device_assets')->where('asset_id', $asset->id)->update(['title' => $metadata['title']]);
+            if ($db->transStatus() === false) throw new RuntimeException('Metadata transaction failed.');
+            $db->transCommit();
         } catch (Throwable $exception) {
+            if (isset($db)) $db->transRollback();
             if ($newPosterPath !== null && is_file($newPosterPath)) @unlink($newPosterPath);
             log_message('error', 'Asset metadata update failed: {message}', ['message' => $exception->getMessage()]);
             return redirect()->to('/control/assets')->with('error', 'Film metadata could not be updated.');
@@ -317,6 +272,26 @@ class AssetController extends BaseController
             ->inline()
             ->setHeader('Cache-Control', 'private, max-age=3600')
             ->setHeader('X-Content-Type-Options', 'nosniff');
+    }
+
+    public function createGenre(): RedirectResponse
+    {
+        try {
+            (new AssetTaxonomyService())->createGenre((string) $this->request->getPost('name'), (int) session()->get('cms_web_user_id'));
+            return redirect()->to('/control/assets')->with('success', 'Genre created and is now available in asset forms.');
+        } catch (RuntimeException $error) {
+            return redirect()->to('/control/assets')->with('error', $error->getMessage());
+        }
+    }
+
+    public function genreStatus(string $publicId): RedirectResponse
+    {
+        $genre = (new GenreModel())->where('public_id', $publicId)->first();
+        if ($genre === null) return redirect()->to('/control/assets')->with('error', 'Genre was not found.');
+        $status = (string) $this->request->getPost('status');
+        if (! in_array($status, ['active', 'inactive'], true)) return redirect()->to('/control/assets')->with('error', 'Genre status is invalid.');
+        if (! (new GenreModel())->update($genre->id, ['status' => $status])) return redirect()->to('/control/assets')->with('error', 'Genre status could not be updated.');
+        return redirect()->to('/control/assets')->with('success', 'Genre status updated. Existing film metadata is preserved.');
     }
 
     public function assign(string $publicId): RedirectResponse
@@ -592,7 +567,7 @@ class AssetController extends BaseController
     /** @param array<string, mixed>|object $source */
     private function versionMetadataSnapshot(array|object $source): string
     {
-        $fields = ['title', 'synopsis', 'genre', 'language', 'subtitles', 'age_rating', 'production_year', 'release_date', 'expires_on', 'distributor_company'];
+        $fields = ['title', 'asset_type', 'synopsis', 'genre', 'language', 'subtitles', 'age_rating', 'production_year', 'release_date', 'expires_on', 'distributor_company'];
         $snapshot = [];
         foreach ($fields as $field) {
             $value = is_array($source) ? ($source[$field] ?? null) : ($source->{$field} ?? null);
@@ -609,6 +584,7 @@ class AssetController extends BaseController
         $year = trim((string) $this->request->getPost('production_year'));
         return [
             'title' => trim((string) $this->request->getPost('title')) ?: $fallbackTitle,
+            'asset_type' => trim((string) $this->request->getPost('asset_type')) ?: 'featured',
             'synopsis' => $text($this->request->getPost('synopsis')),
             'genre' => $text($this->request->getPost('genre')),
             'language' => $text($this->request->getPost('language')),
@@ -626,6 +602,7 @@ class AssetController extends BaseController
     {
         $errors = [];
         if ($metadata['title'] === '' || mb_strlen($metadata['title']) > 255) $errors['title'] = 'Title is required and must not exceed 255 characters.';
+        if (! in_array($metadata['asset_type'], AssetTaxonomyService::TYPES, true)) $errors['asset_type'] = 'Choose a valid asset type.';
         foreach (['genre' => 120, 'language' => 80, 'subtitles' => 160, 'age_rating' => 20, 'distributor_company' => 180] as $field => $limit) {
             if ($metadata[$field] !== null && mb_strlen((string) $metadata[$field]) > $limit) $errors[$field] = ucfirst(str_replace('_', ' ', $field)) . " must not exceed {$limit} characters.";
         }
@@ -648,6 +625,24 @@ class AssetController extends BaseController
             }
         }
         return $errors;
+    }
+
+    /** @return array{ids:?list<int>,names:list<string>} */
+    private function taxonomyInput(): array
+    {
+        if ($this->request->getPost('genres_present') === null && ! is_array($this->request->getPost('genre_ids'))) {
+            return ['ids' => null, 'names' => []];
+        }
+        $taxonomy = new AssetTaxonomyService();
+        $ids = $taxonomy->validateGenreIds($this->request->getPost('genre_ids'));
+        return ['ids' => $ids, 'names' => $taxonomy->namesForIds($ids)];
+    }
+
+    /** @param list<string> $names */
+    private function legacyGenreSummary(array $names): ?string
+    {
+        if ($names === []) return null;
+        return mb_substr(implode(', ', $names), 0, 120);
     }
 
     private function bumpDeviceAssetRevision(int $deviceId): void

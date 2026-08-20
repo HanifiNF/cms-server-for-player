@@ -51,12 +51,14 @@ final class WebControlPanelTest extends CIUnitTestCase
         ], true);
         $this->assertIsInt($adminId);
 
-        $catalogPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/assets');
+        $catalogPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/library');
         $catalogPage->assertOK();
-        $catalogPage->assertSee('Upload a film');
-        $catalogPage->assertSee('No media assets yet');
+        $catalogPage->assertSee('Add Asset');
+        $catalogPage->assertSee('No matching media');
         $catalogPage->assertSee('Preparing upload');
         $catalogPage->assertSee('Cancel upload');
+        $legacyAssetsPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/assets');
+        $legacyAssetsPage->assertRedirectTo('/control/library');
 
         $security = config(Security::class);
         $csrf = csrf_hash();
@@ -117,7 +119,7 @@ final class WebControlPanelTest extends CIUnitTestCase
         $assignedAsset->assertRedirectTo('/control/assets');
         $this->assertNotNull((new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id', $catalogAssetId)->first());
         $this->assertSame(1, (new DeviceModel())->find($device->id)->asset_revision);
-        $catalogPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/assets');
+        $catalogPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/library/dddddddd-2222-4333-8444-555555555555');
         $catalogPage->assertOK();
         $catalogPage->assertSee('CMS Campaign Film');
         $catalogPage->assertSee('Player Lobby');

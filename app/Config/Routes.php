@@ -45,6 +45,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('assets/(:segment)/delete', 'Web\AssetController::delete/$1');
     $routes->post('assets/(:segment)/approve', 'Web\AssetController::approve/$1');
     $routes->post('assets/(:segment)/reject', 'Web\AssetController::reject/$1');
+    $routes->post('genres', 'Web\AssetController::createGenre');
+    $routes->post('genres/(:segment)/status', 'Web\AssetController::genreStatus/$1');
     $routes->get('schedules', 'Web\ScheduleController::index');
     $routes->post('schedules', 'Web\ScheduleController::create');
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
@@ -53,6 +55,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
 });
 $routes->group('control', ['filter' => 'web-assets'], static function (RouteCollection $routes): void {
     $routes->get('assets', 'Web\AssetController::index');
+    $routes->get('library', 'Web\MediaLibraryController::index');
+    $routes->get('library/(:segment)', 'Web\MediaLibraryController::show/$1');
     $routes->post('assets/upload', 'Web\AssetController::upload');
     $routes->get('assets/(:segment)/poster', 'Web\AssetController::poster/$1');
     $routes->post('assets/(:segment)/metadata', 'Web\AssetController::updateMetadata/$1');

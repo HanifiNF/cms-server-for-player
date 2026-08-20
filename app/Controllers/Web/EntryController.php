@@ -15,7 +15,7 @@ class EntryController extends BaseController
         $userId = (int) session()->get('cms_web_user_id');
         $user = $userId > 0 ? (new UserModel())->find($userId) : null;
         if ($user !== null && $user->status === 'active') {
-            if ($user->role === 'distributor') return redirect()->to('/control/assets');
+            if ($user->role === 'distributor') return redirect()->to('/control/library');
             if ($user->role === 'admin') return redirect()->to('/control');
         }
         return redirect()->to('/login');

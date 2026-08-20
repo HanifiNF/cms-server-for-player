@@ -33,9 +33,16 @@ class ScheduleService
         (new AssetExpiryService($this->db))->expireDue();
         $assetPublicIds = [];
         $activeAssetIds = [];
-        foreach ((new AssetModel())->findAll() as $asset) {
+        $catalogAssets = (new AssetModel())->findAll();
+        $genreMap = (new AssetTaxonomyService($this->db))->mapForAssets(array_map(static fn ($asset): int => (int) $asset->id, $catalogAssets));
+        $assetMetadata = [];
+        foreach ($catalogAssets as $asset) {
             $assetPublicIds[(int) $asset->id] = $asset->public_id;
             if ($asset->status === 'active') $activeAssetIds[(int) $asset->id] = true;
+            $assetMetadata[(int) $asset->id] = [
+                'type' => $asset->asset_type ?: 'featured',
+                'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
+            ];
         }
 
         $activeLocationIds = array_map(static fn ($location): int => (int) $location->id, (new LocationModel())->where('status', 'active')->findAll());
@@ -54,6 +61,8 @@ class ScheduleService
                     'filename' => $item->filename,
                     'source' => $item->source,
                     'durationMs' => $durationMs,
+                    'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',
+                    'genres' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['genres'] ?? []) : [],
                 ];
             }
             $result[] = [

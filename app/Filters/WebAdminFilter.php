@@ -18,7 +18,7 @@ class WebAdminFilter implements FilterInterface
             return redirect()->to('/login')->with('error', 'Sign in with an active administrator account.');
         }
         if ($user->role !== 'admin') {
-            return redirect()->to($user->role === 'distributor' ? '/control/assets' : '/login')
+            return redirect()->to($user->role === 'distributor' ? '/control/library' : '/login')
                 ->with('error', 'Administrator access is required for that page.');
         }
 

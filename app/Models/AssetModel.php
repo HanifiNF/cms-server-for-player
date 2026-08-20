@@ -12,7 +12,7 @@ class AssetModel extends Model
     protected $returnType = Asset::class;
     protected $useTimestamps = true;
     protected $allowedFields = [
-        'public_id', 'revision', 'title', 'synopsis', 'genre', 'language', 'subtitles',
+        'public_id', 'revision', 'title', 'asset_type', 'synopsis', 'genre', 'language', 'subtitles',
         'age_rating', 'production_year', 'release_date', 'expires_on', 'expired_at', 'distributor_company',
         'poster_storage_key', 'poster_filename', 'poster_mime_type',
         'filename', 'storage_key', 'mime_type', 'size_bytes',

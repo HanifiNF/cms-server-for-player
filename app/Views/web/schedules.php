@@ -38,6 +38,7 @@ if (is_array($oldKeys)) {
     <label>Description (optional)<input name="description" value="<?= esc($formDescription) ?>" maxlength="1000" placeholder="Notes for this playback"></label>
     <div class="playlist-builder">
       <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on this Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
+      <div class="media-picker-filters"><input id="mediaSearch" type="search" placeholder="Search media title"><select id="mediaTypeFilter"><option value="">All types</option><option value="featured">Featured</option><option value="ads">Ads</option><option value="trailer">Trailer</option><option value="local">Local media</option></select><select id="mediaGenreFilter"><option value="">All genres</option></select></div>
       <div class="playlist-picker"><select id="mediaPicker"><option value="">Select Ready media</option></select><button id="addMedia" type="button" class="btn ghost">Add to playlist</button></div>
       <div id="playlistRows" class="playlist-rows"></div>
       <div id="playlistEmpty" class="empty">Choose a Studio, then add one or more Ready films.</div>
@@ -80,6 +81,9 @@ if (is_array($oldKeys)) {
   const picker = document.getElementById('mediaPicker');
   const rows = document.getElementById('playlistRows');
   const recurrence = document.getElementById('scheduleRecurrence');
+  const mediaSearch = document.getElementById('mediaSearch');
+  const mediaTypeFilter = document.getElementById('mediaTypeFilter');
+  const mediaGenreFilter = document.getElementById('mediaGenreFilter');
   let playlist = [];
   const duration = ms => { const s = Math.max(0, Math.round(Number(ms) / 1000)); return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(v => String(v).padStart(2, '0')).join(':'); };
   function selectedDevice() { return byId.get(deviceSelect.value) || null; }
@@ -92,8 +96,10 @@ if (is_array($oldKeys)) {
     const device = selectedDevice();
     document.getElementById('scheduleTimezone').textContent = device ? `(${device.timezone})` : '';
     picker.innerHTML = '<option value="">Select Ready media</option>';
-    for (const item of device?.media || []) { const option = document.createElement('option'); option.value = item.mediaKey; option.textContent = `${item.title} · ${duration(item.durationMs)} · ${item.source === 'managed' ? 'Downloaded' : 'Media Folder'}`; picker.appendChild(option); }
+    const search = mediaSearch.value.trim().toLowerCase(); const type = mediaTypeFilter.value; const genre = mediaGenreFilter.value;
+    for (const item of device?.media || []) { if (search && !`${item.title} ${item.filename}`.toLowerCase().includes(search)) continue; if (type && item.type !== type) continue; if (genre && !(item.genres || []).includes(genre)) continue; const option = document.createElement('option'); option.value = item.mediaKey; option.textContent = `${item.title} · ${String(item.type || 'local').toUpperCase()} · ${duration(item.durationMs)} · ${item.source === 'managed' ? 'Downloaded' : 'Media Folder'}`; picker.appendChild(option); }
   }
+  function rebuildGenreFilter() { const selected = mediaGenreFilter.value; const genres = [...new Set((selectedDevice()?.media || []).flatMap(item => item.genres || []))].sort(); mediaGenreFilter.innerHTML = '<option value="">All genres</option>'; for (const genre of genres) { const option = document.createElement('option'); option.value = genre; option.textContent = genre; mediaGenreFilter.appendChild(option); } if (genres.includes(selected)) mediaGenreFilter.value = selected; }
   function render() {
     const available = mediaMap(); rows.innerHTML = '';
     playlist = playlist.filter(item => available.has(item.mediaKey));
@@ -112,10 +118,11 @@ if (is_array($oldKeys)) {
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal();
   }
   function updateTotal() { const available = mediaMap(); const total = playlist.reduce((sum, item) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
-  deviceSelect.addEventListener('change', () => { playlist = []; rebuildPicker(); render(); });
+  deviceSelect.addEventListener('change', () => { playlist = []; rebuildGenreFilter(); rebuildPicker(); render(); });
+  mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
   recurrence.addEventListener('change', updateRecurrenceFields);
   document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs }); picker.value = ''; render(); };
-  rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
+  rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
 })();
 </script>
 <?= view('web/_layout_bottom') ?>

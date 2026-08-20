@@ -8,18 +8,19 @@
   <link rel="stylesheet" href="<?= base_url('assets/cms-lifecycle.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-lifecycle.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-schedules.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-schedules.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-locations.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-locations.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-library.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-library.css') ?: 1) ?>">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="<?= site_url($admin->role === 'distributor' ? 'control/assets' : 'control') ?>"><span class="brand-icon">▶</span><span>Player CMS<small><?= $admin->role === 'distributor' ? 'DISTRIBUTOR PORTAL' : 'CONTROL CENTER' ?></small></span></a>
+    <a class="brand" href="<?= site_url($admin->role === 'distributor' ? 'control/library' : 'control') ?>"><span class="brand-icon">▶</span><span>Player CMS<small><?= $admin->role === 'distributor' ? 'DISTRIBUTOR PORTAL' : 'CONTROL CENTER' ?></small></span></a>
     <nav>
       <?php if ($admin->role === 'admin'): ?>
       <a class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>" href="<?= site_url('control') ?>">⌂ <span>Dashboard</span></a>
       <a class="<?= ($active ?? '') === 'operators' ? 'active' : '' ?>" href="<?= site_url('control/operators') ?>">◎ <span>Accounts</span></a>
       <a class="<?= ($active ?? '') === 'locations' ? 'active' : '' ?>" href="<?= site_url('control/locations') ?>">⌖ <span>Locations</span></a>
       <?php endif ?>
-      <a class="<?= ($active ?? '') === 'assets' ? 'active' : '' ?>" href="<?= site_url('control/assets') ?>">◆ <span>Assets</span></a>
+      <a class="<?= ($active ?? '') === 'library' ? 'active' : '' ?>" href="<?= site_url('control/library') ?>">▤ <span>Media Library</span></a>
       <?php if ($admin->role === 'admin'): ?>
       <a class="<?= ($active ?? '') === 'schedules' ? 'active' : '' ?>" href="<?= site_url('control/schedules') ?>">◷ <span>Schedules</span></a>
       <?php endif ?>

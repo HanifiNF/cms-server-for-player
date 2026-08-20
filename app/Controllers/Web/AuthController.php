@@ -12,7 +12,7 @@ class AuthController extends BaseController
     {
         if ((new UserModel())->where('role', 'admin')->countAllResults() === 0) return redirect()->to('/setup');
         $current = $this->currentUser();
-        if ($current !== null) return redirect()->to($current->role === 'distributor' ? '/control/assets' : '/control');
+        if ($current !== null) return redirect()->to($current->role === 'distributor' ? '/control/library' : '/control');
         return view('web/login', ['title' => 'CMS login']);
     }
 
@@ -33,7 +33,7 @@ class AuthController extends BaseController
         session()->regenerate(true);
         session()->set('cms_web_user_id', $user->id);
         (new UserModel())->update($user->id, ['last_login_at' => gmdate('Y-m-d H:i:s')]);
-        return redirect()->to($user->role === 'distributor' ? '/control/assets' : '/control');
+        return redirect()->to($user->role === 'distributor' ? '/control/library' : '/control');
     }
 
     public function logout(): RedirectResponse

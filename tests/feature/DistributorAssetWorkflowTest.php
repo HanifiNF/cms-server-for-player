@@ -44,30 +44,30 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $login = $this->postForm('/login', [
             'email' => 'distributor-one@example.com', 'password' => 'Distributor-One-Password-2026!',
         ]);
-        $login->assertRedirectTo('/control/assets');
+        $login->assertRedirectTo('/control/library');
 
-        $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/assets');
+        $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library');
         $page->assertOK();
         $page->assertSee('DISTRIBUTOR PORTAL');
         $page->assertSee('Distributor One Draft');
         $page->assertDontSee('Distributor Two Draft');
         $page->assertDontSee('Players');
-        $page->assertDontSee('Schedules');
+        $this->assertStringNotContainsString('/control/schedules', $page->response()->getBody());
         $page->assertDontSee('Approve Film');
         $page->assertDontSee('Assign to Player');
         $page->assertDontSee('Delete Asset');
 
         $dashboard = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control');
-        $dashboard->assertRedirectTo('/control/assets');
+        $dashboard->assertRedirectTo('/control/library');
 
         $forbiddenApprove = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
             ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/approve', []);
-        $forbiddenApprove->assertRedirectTo('/control/assets');
+        $forbiddenApprove->assertRedirectTo('/control/library');
         $this->assertSame('draft', (new AssetModel())->find($fixture['assetOne']->id)->status);
 
         $forbiddenAssign = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
             ->postForm('/control/assets/' . $fixture['assetOne']->public_id . '/assign', ['device_id' => $fixture['device']->public_id]);
-        $forbiddenAssign->assertRedirectTo('/control/assets');
+        $forbiddenAssign->assertRedirectTo('/control/library');
         $this->assertSame(0, (new DeviceAssetModel())->where('asset_id', $fixture['assetOne']->id)->countAllResults());
     }
 
@@ -92,7 +92,7 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $this->assertNotNull($assetOne->reviewed_at);
         $this->assertSame('Audio channel must be corrected before cinema distribution.', $assetOne->rejection_reason);
 
-        $ownerPage = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/assets');
+        $ownerPage = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library/' . $fixture['assetOne']->public_id);
         $ownerPage->assertOK();
         $ownerPage->assertSee('REJECTED');
         $ownerPage->assertSee('Audio channel must be corrected');
@@ -198,11 +198,13 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         ]);
 
         $filtered = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
-            ->get('/control/assets?q=Jakarta&status=draft&genre=Animation&distributor=' . $fixture['distributorOneId']);
+            ->get('/control/library?q=Jakarta&status=draft&distributor=' . $fixture['distributorOneId']);
         $filtered->assertOK();
         $filtered->assertSee('Distributor One Draft');
         $filtered->assertDontSee('Distributor Two Draft');
-        $filtered->assertSee('Jakarta Pictures');
+        $detail = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/library/' . $fixture['assetOne']->public_id);
+        $detail->assertOK();
+        $detail->assertSee('Jakarta Pictures');
 
         $posterDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'posters';
         if (! is_dir($posterDir)) mkdir($posterDir, 0775, true);
@@ -262,10 +264,10 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $this->assertSame('draft', $revisionTwo->status);
         $this->assertSame($revisionOne->storage_key, $revisionTwo->storage_key);
 
-        $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/assets');
+        $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library/' . $asset->public_id);
         $page->assertOK();
-        $page->assertSee('REVISION 2');
-        $page->assertSee('Revision history');
+        $page->assertSee('Revision 2');
+        $page->assertSee('Submitted versions');
 
         $this->withSession(['cms_web_user_id' => $fixture['adminId']])
             ->postForm('/control/assets/' . $asset->public_id . '/approve', [])
