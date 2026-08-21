@@ -197,4 +197,96 @@
       cancel.addEventListener('click', function () { if (request) request.abort(); });
     }
   }
+
+  var distributionModals = Array.from(document.querySelectorAll('[data-distribution-modal]'));
+  if (distributionModals.length) {
+    var distributionFocus = null;
+
+    function updateDistributionForm(modal) {
+      var form = modal.querySelector('.distribution-form');
+      if (!form) return;
+      var checkedStudios = Array.from(form.querySelectorAll('[data-studio-check]:checked'));
+      var summary = form.querySelector('[data-distribution-summary]');
+      var submit = form.querySelector('[data-distribution-submit]');
+      if (summary) summary.textContent = checkedStudios.length ? checkedStudios.length + ' Studio(s) selected' : 'No Studio selected';
+      if (submit) submit.disabled = checkedStudios.length === 0;
+
+      form.querySelectorAll('[data-distribution-location]').forEach(function (location) {
+        var parent = location.querySelector('[data-location-check]');
+        if (!parent) return;
+        var enabledChildren = Array.from(location.querySelectorAll('[data-studio-check]:not(:disabled)'));
+        var checkedChildren = enabledChildren.filter(function (child) { return child.checked; });
+        parent.checked = enabledChildren.length > 0 && checkedChildren.length === enabledChildren.length;
+        parent.indeterminate = checkedChildren.length > 0 && checkedChildren.length < enabledChildren.length;
+      });
+    }
+
+    function closeDistribution(modal) {
+      modal.hidden = true;
+      var form = modal.querySelector('.distribution-form');
+      if (form) form.reset();
+      var search = modal.querySelector('[data-distribution-search]');
+      if (search) search.dispatchEvent(new Event('input'));
+      updateDistributionForm(modal);
+      if (!distributionModals.some(function (candidate) { return !candidate.hidden; })) document.body.classList.remove('library-modal-open');
+      if (distributionFocus) distributionFocus.focus();
+    }
+
+    document.querySelectorAll('[data-open-distribution]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var modal = document.querySelector('[data-distribution-modal="' + button.dataset.openDistribution + '"]');
+        if (!modal) return;
+        distributionFocus = button;
+        modal.hidden = false;
+        document.body.classList.add('library-modal-open');
+        var focusTarget = modal.querySelector('[data-distribution-search], .library-modal-close');
+        if (focusTarget) focusTarget.focus();
+      });
+    });
+
+    distributionModals.forEach(function (distributionModal) {
+      distributionModal.querySelectorAll('[data-close-distribution]').forEach(function (button) {
+        button.addEventListener('click', function () { closeDistribution(distributionModal); });
+      });
+      var form = distributionModal.querySelector('.distribution-form');
+      if (!form) return;
+      form.querySelectorAll('[data-location-check]').forEach(function (parent) {
+        parent.addEventListener('change', function () {
+          var location = parent.closest('[data-distribution-location]');
+          location.querySelectorAll('[data-studio-check]:not(:disabled)').forEach(function (child) { child.checked = parent.checked; });
+          updateDistributionForm(distributionModal);
+        });
+      });
+      form.querySelectorAll('[data-studio-check]').forEach(function (child) {
+        child.addEventListener('change', function () { updateDistributionForm(distributionModal); });
+      });
+      var search = form.querySelector('[data-distribution-search]');
+      if (search) search.addEventListener('input', function () {
+        var query = search.value.trim().toLocaleLowerCase();
+        var visibleLocations = 0;
+        form.querySelectorAll('[data-distribution-location]').forEach(function (location) {
+          var locationName = location.querySelector('summary strong').textContent.toLocaleLowerCase();
+          var locationMatches = query === '' || locationName.includes(query);
+          var visibleStudios = 0;
+          location.querySelectorAll('[data-distribution-studio]').forEach(function (studio) {
+            var matches = locationMatches || studio.dataset.searchText.includes(query);
+            studio.hidden = !matches;
+            if (matches) visibleStudios += 1;
+          });
+          location.hidden = visibleStudios === 0;
+          if (!location.hidden) visibleLocations += 1;
+          if (query !== '' && !location.hidden) location.open = true;
+        });
+        var empty = form.querySelector('[data-distribution-empty]');
+        if (empty) empty.hidden = visibleLocations !== 0;
+      });
+      updateDistributionForm(distributionModal);
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      var openModal = distributionModals.find(function (candidate) { return !candidate.hidden; });
+      if (openModal) closeDistribution(openModal);
+    });
+  }
 })();

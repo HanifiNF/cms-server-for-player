@@ -334,6 +334,26 @@ class AssetController extends BaseController
         return redirect()->to('/control/assets')->with('success', 'Asset assigned. The Studio Player will begin downloading it after the next heartbeat.');
     }
 
+    public function assignSelection(string $publicId): RedirectResponse
+    {
+        return $this->assignMany($publicId, false);
+    }
+
+    public function assignGlobal(string $publicId): RedirectResponse
+    {
+        return $this->assignMany($publicId, true);
+    }
+
+    public function unassignSelection(string $publicId): RedirectResponse
+    {
+        return $this->unassignMany($publicId, false);
+    }
+
+    public function unassignGlobal(string $publicId): RedirectResponse
+    {
+        return $this->unassignMany($publicId, true);
+    }
+
     public function approve(string $publicId): RedirectResponse
     {
         (new AssetExpiryService())->expireDue();
@@ -446,6 +466,168 @@ class AssetController extends BaseController
             return redirect()->to('/control/assets')->with('error', 'The Player removal request could not be saved.');
         }
         return redirect()->to('/control/assets')->with('success', 'Removal requested. The Player will delete its local copy when it is safe and acknowledge the request.');
+    }
+
+    private function assignMany(string $publicId, bool $global): RedirectResponse
+    {
+        (new AssetExpiryService())->expireDue();
+        $asset = (new AssetModel())->where('public_id', $publicId)->where('status', 'active')->first();
+        if ($asset === null) return $this->distributionRedirect($publicId, 'error', 'Only an active film can be distributed.');
+
+        $selectedLocations = array_flip($this->postedIds('location_ids'));
+        $selectedStudios = array_flip($this->postedIds('device_ids'));
+        if (! $global && $selectedLocations === [] && $selectedStudios === []) {
+            return $this->distributionRedirect($publicId, 'error', 'Choose at least one Location or Studio.');
+        }
+
+        $activeLocations = [];
+        foreach ((new LocationModel())->where('status', 'active')->findAll() as $location) {
+            $activeLocations[(int) $location->id] = (string) $location->public_id;
+        }
+
+        $targets = [];
+        $incompatible = 0;
+        foreach ((new DeviceModel())->where('status', 'active')->findAll() as $device) {
+            $locationPublicId = $device->location_id !== null ? ($activeLocations[(int) $device->location_id] ?? null) : null;
+            if ($locationPublicId === null) continue;
+            $selected = $global || isset($selectedLocations[$locationPublicId]) || isset($selectedStudios[(string) $device->public_id]);
+            if (! $selected) continue;
+            if ($asset->encryption_format === LdgCryptoService::FORMAT && $device->ldg_version !== LdgCryptoService::FORMAT) {
+                $incompatible++;
+                continue;
+            }
+            $targets[(int) $device->id] = $device;
+        }
+
+        if ($targets === []) {
+            $message = $incompatible > 0
+                ? "No compatible Studio was assigned. {$incompatible} Player(s) must report LDG v1 support first."
+                : 'No active Studio matched this distribution selection.';
+            return $this->distributionRedirect($publicId, 'error', $message);
+        }
+
+        $model = new DeviceAssetModel();
+        $db = Database::connect();
+        $mediaKey = 'managed:' . $asset->public_id;
+        $assigned = 0;
+        $alreadyAssigned = 0;
+        $db->transBegin();
+        try {
+            foreach ($targets as $device) {
+                $existing = $model->where('device_id', $device->id)->where('media_key', $mediaKey)->first();
+                if ($existing !== null && $existing->status !== 'removal_pending') {
+                    $alreadyAssigned++;
+                    continue;
+                }
+                $values = [
+                    'device_id' => $device->id, 'asset_id' => $asset->id, 'media_key' => $mediaKey,
+                    'source' => 'managed', 'title' => $asset->title, 'filename' => $asset->filename,
+                    'relative_path' => $asset->filename, 'size_bytes' => $asset->size_bytes,
+                    'duration_ms' => $asset->duration_ms, 'sha256' => $asset->sha256,
+                    'status' => 'missing', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
+                ];
+                $saved = $existing ? $model->update($existing->id, $values) : $model->insert($values, false);
+                if ($saved === false) throw new RuntimeException('Bulk assignment save failed.');
+                $this->bumpDeviceAssetRevision((int) $device->id);
+                $assigned++;
+            }
+            if ($db->transStatus() === false) throw new RuntimeException('Bulk assignment transaction failed.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            $db->transRollback();
+            log_message('error', 'Bulk asset assignment failed: {message}', ['message' => $error->getMessage()]);
+            return $this->distributionRedirect($publicId, 'error', 'The distribution could not be saved. No partial assignment was kept.');
+        }
+
+        $parts = ["{$assigned} Studio(s) assigned"];
+        if ($alreadyAssigned > 0) $parts[] = "{$alreadyAssigned} already assigned";
+        if ($incompatible > 0) $parts[] = "{$incompatible} incompatible Player(s) skipped";
+        return $this->distributionRedirect($publicId, 'success', implode('; ', $parts) . '.');
+    }
+
+    private function unassignMany(string $publicId, bool $global): RedirectResponse
+    {
+        $asset = (new AssetModel())->where('public_id', $publicId)->first();
+        if ($asset === null) return $this->distributionRedirect($publicId, 'error', 'Film was not found.');
+
+        $selectedLocations = array_flip($this->postedIds('location_ids'));
+        $selectedStudios = array_flip($this->postedIds('device_ids'));
+        if (! $global && $selectedLocations === [] && $selectedStudios === []) {
+            return $this->distributionRedirect($publicId, 'error', 'Choose at least one Location or Studio.');
+        }
+        $mode = trim((string) $this->request->getPost('removal_mode'));
+        if (! in_array($mode, ['retain', 'remove'], true)) {
+            return $this->distributionRedirect($publicId, 'error', 'Choose whether the Player should retain or remove its local file.');
+        }
+
+        $locations = [];
+        foreach ((new LocationModel())->findAll() as $location) $locations[(int) $location->id] = (string) $location->public_id;
+        $assignments = (new DeviceAssetModel())->where('asset_id', $asset->id)->findAll();
+        $devices = [];
+        foreach ((new DeviceModel())->findAll() as $device) $devices[(int) $device->id] = $device;
+
+        $targets = [];
+        foreach ($assignments as $assignment) {
+            $device = $devices[(int) $assignment->device_id] ?? null;
+            if ($device === null) continue;
+            $locationPublicId = $device->location_id !== null ? ($locations[(int) $device->location_id] ?? null) : null;
+            if (! $global && ! isset($selectedStudios[(string) $device->public_id]) && ($locationPublicId === null || ! isset($selectedLocations[$locationPublicId]))) continue;
+            $targets[(int) $assignment->id] = [$assignment, $device];
+        }
+        if ($targets === []) return $this->distributionRedirect($publicId, 'error', 'No current assignment matched this selection.');
+
+        $model = new DeviceAssetModel();
+        $db = Database::connect();
+        $changed = 0;
+        $alreadyPending = 0;
+        $db->transBegin();
+        try {
+            foreach ($targets as [$assignment, $device]) {
+                if ($mode === 'remove') {
+                    if ($assignment->status === 'removal_pending') {
+                        $alreadyPending++;
+                        continue;
+                    }
+                    if (! $model->update($assignment->id, ['status' => 'removal_pending', 'last_reported_at' => gmdate('Y-m-d H:i:s')])) {
+                        throw new RuntimeException('Bulk removal request save failed.');
+                    }
+                } elseif (! $model->delete($assignment->id)) {
+                    throw new RuntimeException('Bulk unassignment delete failed.');
+                }
+                $this->bumpDeviceAssetRevision((int) $device->id);
+                $changed++;
+            }
+            if ($db->transStatus() === false) throw new RuntimeException('Bulk unassignment transaction failed.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            $db->transRollback();
+            log_message('error', 'Bulk asset unassignment failed: {message}', ['message' => $error->getMessage()]);
+            return $this->distributionRedirect($publicId, 'error', 'The distribution change failed. No partial change was kept.');
+        }
+
+        $message = $mode === 'remove'
+            ? "Removal requested for {$changed} Studio(s)"
+            : "{$changed} Studio assignment(s) removed; local files were retained";
+        if ($alreadyPending > 0) $message .= "; {$alreadyPending} removal request(s) already pending";
+        return $this->distributionRedirect($publicId, 'success', $message . '.');
+    }
+
+    /** @return list<string> */
+    private function postedIds(string $field): array
+    {
+        $value = $this->request->getPost($field);
+        if (! is_array($value)) return [];
+        $ids = [];
+        foreach ($value as $id) {
+            $id = trim((string) $id);
+            if ($id !== '' && mb_strlen($id) <= 80) $ids[$id] = $id;
+        }
+        return array_values($ids);
+    }
+
+    private function distributionRedirect(string $publicId, string $flashType, string $message): RedirectResponse
+    {
+        return redirect()->to('/control/library/' . rawurlencode($publicId) . '#distribution')->with($flashType, $message);
     }
 
     public function delete(string $publicId): RedirectResponse

@@ -40,6 +40,10 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('devices/(:segment)/revoke', 'Web\DeviceController::revoke/$1');
     $routes->post('devices/(:segment)/delete', 'Web\DeviceController::delete/$1');
     $routes->post('assets/(:segment)/assign', 'Web\AssetController::assign/$1');
+    $routes->post('assets/(:segment)/assign-selection', 'Web\AssetController::assignSelection/$1');
+    $routes->post('assets/(:segment)/assign-global', 'Web\AssetController::assignGlobal/$1');
+    $routes->post('assets/(:segment)/unassign-selection', 'Web\AssetController::unassignSelection/$1');
+    $routes->post('assets/(:segment)/unassign-global', 'Web\AssetController::unassignGlobal/$1');
     $routes->post('assets/(:segment)/unassign/(:segment)', 'Web\AssetController::unassign/$1/$2');
     $routes->post('assets/(:segment)/remove/(:segment)', 'Web\AssetController::unassignAndRemove/$1/$2');
     $routes->post('assets/(:segment)/delete', 'Web\AssetController::delete/$1');

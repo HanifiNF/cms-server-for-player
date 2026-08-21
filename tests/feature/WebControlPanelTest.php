@@ -123,7 +123,8 @@ final class WebControlPanelTest extends CIUnitTestCase
         $catalogPage->assertOK();
         $catalogPage->assertSee('CMS Campaign Film');
         $catalogPage->assertSee('Player Lobby');
-        $catalogPage->assertSee('Unassign &amp; Remove');
+        $catalogPage->assertSee('Assign Studios');
+        $catalogPage->assertSee('Global Unassign');
         $catalogPage->assertSee('Delete Asset');
 
         $blockedDelete = $this->withSession(['cms_web_user_id' => $adminId])
