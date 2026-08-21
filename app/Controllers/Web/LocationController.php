@@ -3,9 +3,12 @@
 namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
+use App\Libraries\AssetExpiryService;
+use App\Libraries\AssetTaxonomyService;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\LocationService;
 use App\Libraries\RealtimeOutboxService;
+use App\Models\AssetModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\LocationModel;
@@ -68,6 +71,7 @@ class LocationController extends BaseController
 
     public function show(string $publicId): string|RedirectResponse
     {
+        (new AssetExpiryService())->expireDue();
         $location = $this->location($publicId);
         if ($location === null) return redirect()->to('/control/locations')->with('error', 'Location was not found.');
 
@@ -82,6 +86,17 @@ class LocationController extends BaseController
         foreach ((new DeviceAssetModel())->select('device_id, COUNT(*) AS asset_count')->groupBy('device_id')->findAll() as $row) {
             $assetCounts[(int) $row->device_id] = (int) $row->asset_count;
         }
+        $assignableAssets = (new AssetModel())->where('status', 'active')->orderBy('title')->findAll();
+        $assetIds = array_map(static fn (object $asset): int => (int) $asset->id, $assignableAssets);
+        $assetPublicIds = [];
+        foreach ($assignableAssets as $asset) $assetPublicIds[(int) $asset->id] = (string) $asset->public_id;
+        $assignedAssets = [];
+        if ($assetPublicIds !== []) {
+            foreach ((new DeviceAssetModel())->whereIn('asset_id', array_keys($assetPublicIds))->findAll() as $assignment) {
+                $assignedAssets[(int) $assignment->device_id][] = $assetPublicIds[(int) $assignment->asset_id];
+            }
+        }
+        $assetGenres = (new AssetTaxonomyService())->mapForAssets($assetIds);
         $connection = new DeviceEnrollmentService();
         $studios = [];
         foreach ((new DeviceModel())->where('location_id', $location->id)->orderBy('name')->findAll() as $device) {
@@ -90,6 +105,7 @@ class LocationController extends BaseController
                 'connection' => $device->status === 'active' ? $connection->connectionStatus($device) : $device->status,
                 'operatorName' => $operatorNames[(int) $device->assigned_user_id] ?? 'Unassigned',
                 'assetCount' => $assetCounts[(int) $device->id] ?? 0,
+                'assignedAssetIds' => $assignedAssets[(int) $device->id] ?? [],
             ];
         }
 
@@ -98,6 +114,8 @@ class LocationController extends BaseController
             'location' => $location, 'studios' => $studios, 'operators' => $operators,
             'assignmentCounts' => $assignmentCounts,
             'availableLocations' => (new LocationModel())->where('status', 'active')->orderBy('name')->findAll(),
+            'assignableAssets' => $assignableAssets, 'assetGenres' => $assetGenres,
+            'assetTypes' => AssetTaxonomyService::TYPES,
         ]);
     }
 
@@ -192,6 +210,85 @@ class LocationController extends BaseController
         }
     }
 
+    public function assignAssets(string $publicId, string $devicePublicId): RedirectResponse
+    {
+        (new AssetExpiryService())->expireDue();
+        $location = $this->location($publicId);
+        $device = $this->studio($publicId, $devicePublicId);
+        if ($location === null || $device === null) return $this->back($publicId, 'Studio was not found in this Location.');
+        if ($location->status !== 'active' || $device->status !== 'active') {
+            return $this->back($publicId, 'Assets can only be assigned to an active, paired Studio in an active Location.');
+        }
+
+        $requested = $this->postedPublicIds('asset_ids');
+        if ($requested === []) return $this->back($publicId, 'Choose at least one asset.');
+        $available = [];
+        foreach ((new AssetModel())->where('status', 'active')->findAll() as $asset) {
+            $available[(string) $asset->public_id] = $asset;
+        }
+        $selected = [];
+        foreach ($requested as $assetPublicId) {
+            if (isset($available[$assetPublicId])) $selected[(int) $available[$assetPublicId]->id] = $available[$assetPublicId];
+        }
+        if ($selected === []) return $this->back($publicId, 'No active, unexpired asset matched this selection.');
+
+        $model = new DeviceAssetModel();
+        $existing = [];
+        foreach ($model->where('device_id', $device->id)->findAll() as $assignment) {
+            $existing[(string) $assignment->media_key] = $assignment;
+        }
+
+        $db = Database::connect();
+        $assigned = 0;
+        $alreadyAssigned = 0;
+        $incompatible = 0;
+        $db->transBegin();
+        try {
+            foreach ($selected as $asset) {
+                if ($asset->encryption_format === 'ldg-v1' && $device->ldg_version !== 'ldg-v1') {
+                    $incompatible++;
+                    continue;
+                }
+                $mediaKey = 'managed:' . $asset->public_id;
+                $current = $existing[$mediaKey] ?? null;
+                if ($current !== null && $current->status !== 'removal_pending') {
+                    $alreadyAssigned++;
+                    continue;
+                }
+                $values = [
+                    'device_id' => $device->id, 'asset_id' => $asset->id, 'media_key' => $mediaKey,
+                    'source' => 'managed', 'title' => $asset->title, 'filename' => $asset->filename,
+                    'relative_path' => $asset->filename, 'size_bytes' => $asset->size_bytes,
+                    'duration_ms' => $asset->duration_ms, 'sha256' => $asset->sha256,
+                    'status' => 'missing', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
+                ];
+                $saved = $current ? $model->update($current->id, $values) : $model->insert($values, false);
+                if ($saved === false) throw new RuntimeException('Studio asset assignment save failed.');
+                $assigned++;
+            }
+            if ($assigned > 0) {
+                $updated = $db->table('devices')->where('id', $device->id)
+                    ->set('asset_revision', 'asset_revision + 1', false)
+                    ->set('updated_at', gmdate('Y-m-d H:i:s'))->update();
+                if (! $updated) throw new RuntimeException('Studio asset revision update failed.');
+                (new RealtimeOutboxService($db))->queueDevice((int) $device->id, 'asset.revision.changed', [
+                    'assigned_count' => $assigned, 'source' => 'studio.asset.assignment',
+                ]);
+            }
+            if ($db->transStatus() === false) throw new RuntimeException('Studio asset assignment transaction failed.');
+            $db->transCommit();
+        } catch (Throwable $error) {
+            $db->transRollback();
+            log_message('error', 'Studio bulk asset assignment failed: {message}', ['message' => $error->getMessage()]);
+            return $this->back($publicId, 'The selected assets could not be assigned. No partial assignment was kept.');
+        }
+
+        $parts = ["{$assigned} asset(s) assigned"];
+        if ($alreadyAssigned > 0) $parts[] = "{$alreadyAssigned} already assigned";
+        if ($incompatible > 0) $parts[] = "{$incompatible} incompatible asset(s) skipped";
+        return redirect()->to($this->detailUrl($publicId))->with('success', implode('; ', $parts) . '.');
+    }
+
     public function resetStudioPairing(string $publicId, string $devicePublicId): RedirectResponse
     {
         $device = $this->studio($publicId, $devicePublicId);
@@ -242,7 +339,7 @@ class LocationController extends BaseController
             (new LocationService())->update($location, $this->request->getPost());
             return redirect()->to('/control/locations')->with('success', 'Location updated. Connected Players will receive the new name on heartbeat.');
         } catch (Throwable $error) {
-            return redirect()->to('/control/locations')->with('error', $error->getMessage());
+            return redirect()->to('/control/locations')->with('error', $error->getMessage())->with('modal', 'edit-location-' . $publicId);
         }
     }
 
@@ -297,6 +394,19 @@ class LocationController extends BaseController
     private function validTimezone(string $timezone): bool
     {
         return in_array($timezone, DateTimeZone::listIdentifiers(), true);
+    }
+
+    /** @return list<string> */
+    private function postedPublicIds(string $field): array
+    {
+        $values = $this->request->getPost($field);
+        if (! is_array($values)) return [];
+        $ids = [];
+        foreach (array_slice($values, 0, 250) as $value) {
+            $id = trim((string) $value);
+            if ($id !== '' && mb_strlen($id) <= 80) $ids[$id] = $id;
+        }
+        return array_values($ids);
     }
 
     private function detailUrl(string $publicId): string

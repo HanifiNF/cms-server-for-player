@@ -89,7 +89,9 @@ class ScheduleController extends BaseController
     {
         return [
             'title' => $this->request->getPost('title'), 'description' => $this->request->getPost('description'),
-            'device_id' => $this->request->getPost('device_id'), 'start_at' => $this->request->getPost('start_at'),
+            'device_id' => $this->request->getPost('device_id'),
+            'device_ids' => $this->request->getPost('device_ids'),
+            'timezone' => $this->request->getPost('timezone'), 'start_at' => $this->request->getPost('start_at'),
             'recurrence' => $this->request->getPost('recurrence'),
             'days_of_week' => $this->request->getPost('days_of_week'),
             'recurrence_until' => $this->request->getPost('recurrence_until'),

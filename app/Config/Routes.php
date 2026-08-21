@@ -29,6 +29,7 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('locations/(:segment)/studios/(:segment)/details', 'Web\LocationController::updateStudio/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/assignment', 'Web\LocationController::assignStudio/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/operators', 'Web\LocationController::createOperator/$1/$2');
+    $routes->post('locations/(:segment)/studios/(:segment)/assets', 'Web\LocationController::assignAssets/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/reset-pairing', 'Web\LocationController::resetStudioPairing/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/revoke', 'Web\LocationController::revokeStudio/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/delete', 'Web\LocationController::deleteStudio/$1/$2');

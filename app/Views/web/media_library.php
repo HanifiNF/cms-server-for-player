@@ -2,7 +2,7 @@
 
 <section class="library-hero">
   <div><p>CATALOG INTELLIGENCE</p><h2>Media Library</h2><span><?= $isAdmin ? 'Review, organize, and distribute every submitted film.' : 'Upload films and follow their review and distribution status.' ?></span></div>
-  <button class="btn primary" type="button" data-open-asset-upload>+ Add Asset</button>
+  <div class="cms-toolbar-actions"><?php if ($isAdmin): ?><button class="btn ghost" type="button" data-cms-modal-open="genre-manager-modal">Manage genre options</button><?php endif ?><button class="btn primary" type="button" data-open-asset-upload>+ Add Asset</button></div>
 </section>
 
 <section class="library-status-grid" aria-label="Asset status summary">
@@ -60,5 +60,11 @@
     <div class="library-modal-body"><?= view('web/_asset_upload_form', get_defined_vars()) ?></div>
   </section>
 </div>
+
+<?php if ($isAdmin): ?>
+<dialog class="cms-action-modal" id="genre-manager-modal" data-cms-modal <?= session('modal') === 'genre-manager-modal' ? 'data-auto-open="true"' : '' ?>>
+  <div class="cms-modal-shell"><header class="cms-modal-header"><div><p>TAXONOMY</p><h2>Manage Genres</h2><span>Create catalog filters and control which options appear in film forms.</span></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><form method="post" action="<?= site_url('control/genres') ?>" class="genre-create-form"><?= csrf_field() ?><input type="hidden" name="_modal_context" value="genre-manager-modal"><input name="name" maxlength="80" placeholder="New genre name" required autofocus><button class="btn primary" type="submit">Add Genre</button></form><div class="genre-admin-list"><?php foreach ($genres as $genre): ?><div><span><strong><?= esc($genre->name) ?></strong><small><?= esc(strtoupper($genre->status)) ?></small></span><form method="post" action="<?= site_url('control/genres/' . rawurlencode($genre->public_id) . '/status') ?>"><?= csrf_field() ?><input type="hidden" name="status" value="<?= $genre->status === 'active' ? 'inactive' : 'active' ?>"><button class="btn ghost" type="submit"><?= $genre->status === 'active' ? 'Disable' : 'Enable' ?></button></form></div><?php endforeach ?></div></div><footer class="cms-modal-footer"><span>Disabled genres remain attached to existing films.</span><div><button class="btn primary" type="button" data-cms-modal-close>Done</button></div></footer></div>
+</dialog>
+<?php endif ?>
 
 <?= view('web/_layout_bottom') ?>

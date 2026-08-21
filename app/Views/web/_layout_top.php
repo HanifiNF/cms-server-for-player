@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="<?= base_url('assets/cms-schedules.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-schedules.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-locations.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-locations.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-library.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-library.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-modal.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-modal.css') ?: 1) ?>">
 </head>
 <body>
 <div class="app-shell">

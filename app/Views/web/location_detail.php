@@ -27,7 +27,8 @@
         <?php else: ?><strong><?= esc($item['operatorName']) ?></strong><small>Reset pairing before changing assignment.</small><?php endif ?>
       </div>
       <div class="studio-row-actions">
-        <a class="btn ghost" href="<?= site_url('control/devices/' . rawurlencode($studio->public_id) . '/assets') ?>">Assets</a>
+        <a class="btn ghost" href="<?= site_url('control/devices/' . rawurlencode($studio->public_id) . '/assets') ?>">View Assets</a>
+        <button class="btn primary" type="button" data-open-asset-assignment data-studio-name="<?= esc($studio->name, 'attr') ?>" data-assign-url="<?= site_url('control/locations/' . rawurlencode($location->public_id) . '/studios/' . rawurlencode($studio->public_id) . '/assets') ?>" data-assigned-assets="<?= esc(json_encode($item['assignedAssetIds'], JSON_THROW_ON_ERROR), 'attr') ?>" data-ldg-version="<?= esc((string) $studio->ldg_version, 'attr') ?>" <?= $studio->status !== 'active' ? 'disabled title="Pair and activate this Studio before assigning assets"' : '' ?>>Assign Assets</button>
         <?php if ($studio->status !== 'revoked'): ?><button class="btn ghost" type="button" data-open-dialog="edit-<?= esc($studio->public_id, 'attr') ?>">Edit</button><?php endif ?>
         <?php if (in_array($studio->status, ['active', 'revoked'], true)): ?><button class="btn ghost" type="button" data-open-dialog="reset-<?= esc($studio->public_id, 'attr') ?>">Reset pairing</button><?php endif ?>
         <?php if ($studio->status === 'active'): ?><button class="btn danger" type="button" data-open-dialog="revoke-<?= esc($studio->public_id, 'attr') ?>">Revoke</button><?php endif ?>
@@ -47,6 +48,8 @@
 
 <dialog class="cms-modal" id="quick-operator-dialog"><div class="modal-card"><div class="modal-head"><div><p>QUICK ACCOUNT</p><h3>Add operator for <span id="quick-operator-studio"></span></h3></div><button type="button" class="modal-close" data-close-dialog>×</button></div><form method="post" action="" class="modal-form" id="quick-operator-form"><?= csrf_field() ?><label>Name<input name="name" maxlength="120" required></label><label>Email<input type="email" name="email" required></label><label>Password<input type="password" name="password" minlength="12" autocomplete="new-password" required></label><label>Confirm password<input type="password" name="password_confirmation" minlength="12" autocomplete="new-password" required></label><p class="muted">The account is created as an active operator and assigned immediately. The Player PC must still complete pairing.</p><div class="modal-actions"><button type="button" class="btn ghost" data-close-dialog>Cancel</button><button class="btn primary" type="submit">Create and assign</button></div></form></div></dialog>
 
+<dialog class="cms-modal studio-assets-modal" id="assign-assets-dialog"><div class="modal-card"><div class="modal-head"><div><p>ASSET DISTRIBUTION</p><h3>Assign assets to <span id="asset-assignment-studio"></span></h3><span>Choose multiple active films for this Studio.</span></div><button type="button" class="modal-close" data-close-dialog aria-label="Close">×</button></div><form method="post" action="" id="studio-asset-assignment-form"><?= csrf_field() ?><div class="studio-asset-toolbar"><label>Search assets<input type="search" placeholder="Title, filename, genre, or distributor…" data-studio-asset-search></label><label>Asset type<select data-studio-asset-type><option value="">All types</option><?php foreach ($assetTypes as $type): ?><option value="<?= esc($type) ?>"><?= esc(ucfirst($type)) ?></option><?php endforeach ?></select></label><button class="btn ghost" type="button" data-select-visible-assets>Select all filtered</button></div><div class="studio-asset-list" data-studio-asset-list><?php if ($assignableAssets === []): ?><div class="empty">No active assets are available.</div><?php else: ?><?php foreach ($assignableAssets as $catalogAsset): $catalogGenres = $assetGenres[(int) $catalogAsset->id] ?? []; $searchText = mb_strtolower(implode(' ', [$catalogAsset->title, $catalogAsset->filename, $catalogAsset->distributor_company, $catalogAsset->asset_type, ...array_column($catalogGenres, 'name')])); ?><label class="studio-asset-option" data-studio-asset-option data-search-text="<?= esc($searchText, 'attr') ?>" data-asset-type="<?= esc($catalogAsset->asset_type ?: 'featured', 'attr') ?>" data-requires-ldg="<?= $catalogAsset->encryption_format === 'ldg-v1' ? '1' : '0' ?>"><input type="checkbox" name="asset_ids[]" value="<?= esc($catalogAsset->public_id, 'attr') ?>" data-asset-size="<?= (int) $catalogAsset->size_bytes ?>"><span class="studio-asset-copy"><strong><?= esc($catalogAsset->title) ?></strong><small><?= esc($catalogAsset->filename) ?></small><em><?= esc(ucfirst($catalogAsset->asset_type ?: 'featured')) ?><?= $catalogGenres !== [] ? ' · ' . esc(implode(', ', array_column($catalogGenres, 'name'))) : '' ?> · <?= number_format(((int) $catalogAsset->size_bytes) / 1048576, 2) ?> MB</em></span><span class="badge studio-asset-state" data-studio-asset-state>AVAILABLE</span></label><?php endforeach ?><?php endif ?><div class="empty" data-studio-assets-empty hidden>No asset matches these filters.</div></div><div class="studio-asset-modal-actions"><span data-studio-asset-summary>No asset selected</span><div><button type="button" class="btn ghost" data-close-dialog>Cancel</button><button type="submit" class="btn primary" data-studio-asset-submit disabled>Assign Assets</button></div></div></form></div></dialog>
+
 <script>
 (() => {
   const openDialog = (id) => document.getElementById(id)?.showModal();
@@ -60,6 +63,77 @@
     select.value = select.querySelector('option[selected]')?.value || '';
     openDialog('quick-operator-dialog');
   }));
+  const assetDialog = document.getElementById('assign-assets-dialog');
+  const assetForm = document.getElementById('studio-asset-assignment-form');
+  if (assetDialog && assetForm) {
+    const assetSearch = assetForm.querySelector('[data-studio-asset-search]');
+    const assetType = assetForm.querySelector('[data-studio-asset-type]');
+    const assetRows = [...assetForm.querySelectorAll('[data-studio-asset-option]')];
+    const assetSummary = assetForm.querySelector('[data-studio-asset-summary]');
+    const assetSubmit = assetForm.querySelector('[data-studio-asset-submit]');
+    const selectVisible = assetForm.querySelector('[data-select-visible-assets]');
+    const assetEmpty = assetForm.querySelector('[data-studio-assets-empty]');
+
+    const formatBytes = (bytes) => {
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let value = Math.max(0, Number(bytes) || 0), unit = 0;
+      while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+      return `${value.toFixed(unit >= 3 ? 2 : unit > 0 ? 1 : 0)} ${units[unit]}`;
+    };
+    const updateAssetSelection = () => {
+      const selected = assetRows.map((row) => row.querySelector('input')).filter((input) => input.checked && !input.disabled);
+      const bytes = selected.reduce((total, input) => total + Number(input.dataset.assetSize || 0), 0);
+      assetSummary.textContent = selected.length ? `${selected.length} asset(s) · ${formatBytes(bytes)}` : 'No asset selected';
+      assetSubmit.disabled = selected.length === 0;
+      const visible = assetRows.map((row) => row.querySelector('input')).filter((input) => !input.disabled && !input.closest('[data-studio-asset-option]').hidden);
+      selectVisible.textContent = visible.length > 0 && visible.every((input) => input.checked) ? 'Clear filtered' : 'Select all filtered';
+    };
+    const filterAssets = () => {
+      const query = assetSearch.value.trim().toLocaleLowerCase();
+      const type = assetType.value;
+      let visible = 0;
+      assetRows.forEach((row) => {
+        const matches = (!query || row.dataset.searchText.includes(query)) && (!type || row.dataset.assetType === type);
+        row.hidden = !matches;
+        if (matches) visible += 1;
+      });
+      assetEmpty.hidden = visible !== 0;
+      updateAssetSelection();
+    };
+    document.querySelectorAll('[data-open-asset-assignment]').forEach((button) => button.addEventListener('click', () => {
+      assetForm.reset();
+      assetForm.action = button.dataset.assignUrl;
+      document.getElementById('asset-assignment-studio').textContent = button.dataset.studioName;
+      const assigned = new Set(JSON.parse(button.dataset.assignedAssets || '[]'));
+      const supportsLdg = button.dataset.ldgVersion === 'ldg-v1';
+      assetRows.forEach((row) => {
+        const input = row.querySelector('input');
+        const state = row.querySelector('[data-studio-asset-state]');
+        const isAssigned = assigned.has(input.value);
+        const incompatible = row.dataset.requiresLdg === '1' && !supportsLdg;
+        input.checked = false;
+        input.disabled = isAssigned || incompatible;
+        row.classList.toggle('is-assigned', isAssigned);
+        row.classList.toggle('is-incompatible', incompatible);
+        state.textContent = isAssigned ? 'ASSIGNED' : incompatible ? 'PLAYER UPDATE REQUIRED' : 'AVAILABLE';
+        state.className = `badge studio-asset-state${isAssigned ? ' active' : incompatible ? ' rejected' : ''}`;
+      });
+      assetSearch.value = '';
+      assetType.value = '';
+      filterAssets();
+      openDialog('assign-assets-dialog');
+      window.setTimeout(() => assetSearch.focus(), 0);
+    }));
+    assetRows.forEach((row) => row.querySelector('input').addEventListener('change', updateAssetSelection));
+    assetSearch.addEventListener('input', filterAssets);
+    assetType.addEventListener('change', filterAssets);
+    selectVisible.addEventListener('click', () => {
+      const visible = assetRows.map((row) => row.querySelector('input')).filter((input) => !input.disabled && !input.closest('[data-studio-asset-option]').hidden);
+      const shouldCheck = visible.some((input) => !input.checked);
+      visible.forEach((input) => { input.checked = shouldCheck; });
+      updateAssetSelection();
+    });
+  }
   if (location.hash === '#add-studio') { openDialog('add-studio-dialog'); history.replaceState(null, '', location.pathname); }
 })();
 </script>

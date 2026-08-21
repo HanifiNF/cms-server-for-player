@@ -5,6 +5,7 @@ use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
 use App\Models\ScheduleModel;
 use App\Models\UserModel;
+use App\Libraries\ScheduleService;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
 use CodeIgniter\Test\FeatureTestTrait;
@@ -147,6 +148,87 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame(2, (new ScheduleModel())->countAllResults());
     }
 
+    public function testOneScheduleTargetsMultipleStudiosAtTheSameAbsoluteInstant(): void
+    {
+        $fixture = $this->fixture();
+        $secondToken = 'schedule-second-player-token';
+        $secondDevice = $this->additionalDevice($fixture, $secondToken, true, true);
+        $start = (new \DateTimeImmutable('+20 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i');
+
+        $created = $this->postForm('/control/schedules', [
+            'title' => 'Synchronized Premiere',
+            'device_ids' => [$fixture['device']->public_id, $secondDevice->public_id],
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start, 'priority' => 10,
+            'media_keys' => [$fixture['localKey'], $fixture['managedKey']],
+            'duration_ms' => [60000, 90000],
+        ], $fixture['adminId']);
+        $created->assertRedirectTo('/control/schedules');
+
+        $schedule = (new ScheduleModel())->where('title', 'Synchronized Premiere')->first();
+        $this->assertNotNull($schedule);
+        $targets = Database::connect()->table('schedule_targets')->where('schedule_id', $schedule->id)->get()->getResultArray();
+        $this->assertCount(2, $targets);
+        $this->assertCount(1, (new ScheduleService())->listForWeb(), 'A multi-target Schedule must remain one Schedule in the CMS.');
+        $this->assertSame(1, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
+        $this->assertSame(1, (int) (new DeviceModel())->find($secondDevice->id)->schedule_revision);
+
+        $firstSnapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules');
+        $secondSnapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $secondToken])->get('/api/player/schedules');
+        $firstPayload = json_decode($firstSnapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $secondPayload = json_decode($secondSnapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $this->assertCount(1, $firstPayload['schedules']);
+        $this->assertCount(1, $secondPayload['schedules']);
+        $this->assertSame($firstPayload['schedules'][0]['id'], $secondPayload['schedules'][0]['id']);
+        $this->assertSame($firstPayload['schedules'][0]['startTime'], $secondPayload['schedules'][0]['startTime']);
+        $this->assertSame($firstPayload['schedules'][0]['playlist'], $secondPayload['schedules'][0]['playlist']);
+
+        $updated = $this->postForm('/control/schedules/' . $schedule->public_id . '/update', [
+            'title' => 'Synchronized Premiere', 'device_ids' => [$secondDevice->public_id],
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start, 'priority' => 10,
+            'media_keys' => [$fixture['managedKey']], 'duration_ms' => [90000],
+        ], $fixture['adminId']);
+        $updated->assertRedirectTo('/control/schedules');
+        $this->assertSame(2, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision, 'Removed targets must receive a new revision.');
+        $this->assertSame(2, (int) (new DeviceModel())->find($secondDevice->id)->schedule_revision);
+
+        $firstAfterUpdate = json_decode($this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules')->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $secondAfterUpdate = json_decode($this->withHeaders(['Authorization' => 'Bearer ' . $secondToken])->get('/api/player/schedules')->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $this->assertSame([], $firstAfterUpdate['schedules']);
+        $this->assertCount(1, $secondAfterUpdate['schedules']);
+    }
+
+    public function testMultiStudioScheduleRequiresCommonReadyMediaAndChecksEveryTargetForConflicts(): void
+    {
+        $fixture = $this->fixture();
+        $secondDevice = $this->additionalDevice($fixture, 'schedule-intersection-token', false, true);
+        $start = (new \DateTimeImmutable('+25 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i');
+
+        $missingOnSecond = $this->postForm('/control/schedules', [
+            'title' => 'Invalid Shared Playlist',
+            'device_ids' => [$fixture['device']->public_id, $secondDevice->public_id],
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start,
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [60000],
+        ], $fixture['adminId']);
+        $missingOnSecond->assertRedirect();
+        $this->assertSame(0, (new ScheduleModel())->countAllResults());
+
+        $secondOnly = $this->postForm('/control/schedules', [
+            'title' => 'Second Studio Exclusive', 'device_id' => $secondDevice->public_id,
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start,
+            'media_keys' => [$fixture['managedKey']], 'duration_ms' => [90000],
+        ], $fixture['adminId']);
+        $secondOnly->assertRedirectTo('/control/schedules');
+
+        $conflictOnSecond = $this->postForm('/control/schedules', [
+            'title' => 'Conflict On One Of Two Studios',
+            'device_ids' => [$fixture['device']->public_id, $secondDevice->public_id],
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start,
+            'media_keys' => [$fixture['managedKey']], 'duration_ms' => [90000],
+        ], $fixture['adminId']);
+        $conflictOnSecond->assertRedirect();
+        $this->assertSame(1, (new ScheduleModel())->countAllResults());
+    }
+
     /** @return array<string, mixed> */
     private function fixture(): array
     {
@@ -188,6 +270,34 @@ final class ScheduleFlowTest extends CIUnitTestCase
             'size_bytes' => 0, 'duration_ms' => 30000, 'status' => 'missing', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
         ]);
         return compact('adminId', 'token', 'device', 'assetPublicId', 'localKey', 'managedKey');
+    }
+
+    /** @param array<string, mixed> $fixture */
+    private function additionalDevice(array $fixture, string $token, bool $withLocal, bool $withManaged): object
+    {
+        $deviceId = (new DeviceModel())->insert([
+            'public_id' => 'cccccccc-2222-4333-8444-555555555555', 'name' => 'Player Bandung',
+            'location' => 'Bandung', 'device_key_hash' => hash('sha256', $token),
+            'status' => 'active', 'timezone' => 'Asia/Jakarta',
+        ], true);
+        $assets = new DeviceAssetModel();
+        if ($withLocal) {
+            $assets->insert([
+                'device_id' => $deviceId, 'media_key' => $fixture['localKey'], 'source' => 'local',
+                'title' => 'Local Campaign', 'filename' => 'local.mp4', 'relative_path' => 'local.mp4',
+                'size_bytes' => 1024, 'duration_ms' => 60000, 'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+        }
+        if ($withManaged) {
+            $asset = (new AssetModel())->where('public_id', $fixture['assetPublicId'])->first();
+            $assets->insert([
+                'device_id' => $deviceId, 'asset_id' => $asset->id, 'media_key' => $fixture['managedKey'], 'source' => 'managed',
+                'title' => 'Managed Campaign', 'filename' => 'managed.mp4', 'relative_path' => 'managed.mp4',
+                'size_bytes' => 2048, 'duration_ms' => 90000, 'sha256' => str_repeat('a', 64),
+                'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+        }
+        return (new DeviceModel())->find($deviceId);
     }
 
     /** @param array<string, mixed> $data */

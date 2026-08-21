@@ -8,6 +8,7 @@ use App\Models\UserModel;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
 use CodeIgniter\Test\FeatureTestTrait;
+use Config\Database;
 use Config\Security;
 
 /** @internal */
@@ -129,6 +130,46 @@ final class BulkAssetDistributionTest extends CIUnitTestCase
         $secondPage->assertOK();
         $this->assertSame(1, substr_count($secondPage->response()->getBody(), 'class="distribution-location-group"'));
         $secondPage->assertSee('Previous');
+    }
+
+    public function testStudioCanAssignMultipleAssetsWithOneRevisionAndRealtimeEvent(): void
+    {
+        $fixture = $this->fixture();
+        $secondAssetId = (new AssetModel())->insert([
+            'public_id' => 'c0000000-0000-4000-8000-000000000002', 'title' => 'Studio Side Trailer',
+            'asset_type' => 'trailer', 'filename' => 'studio-side-trailer.ldg',
+            'storage_key' => 'assets/studio-side-trailer.ldg', 'mime_type' => 'application/octet-stream',
+            'size_bytes' => 8192, 'sha256' => str_repeat('d', 64), 'duration_ms' => 30000,
+            'status' => 'active', 'created_by' => $fixture['adminId'], 'encryption_format' => 'ldg-v1',
+        ], true);
+
+        $assigned = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->postForm(
+            '/control/locations/' . $fixture['bogor']->public_id . '/studios/' . $fixture['bogorOne']->public_id . '/assets',
+            ['asset_ids' => [$fixture['asset']->public_id, 'c0000000-0000-4000-8000-000000000002', $fixture['asset']->public_id]]
+        );
+        $assigned->assertRedirectTo('/control/locations/' . $fixture['bogor']->public_id);
+        $inventory = new DeviceAssetModel();
+        $this->assertSame(2, $inventory->where('device_id', $fixture['bogorOne']->id)->countAllResults());
+        $this->assertNotNull($inventory->where('device_id', $fixture['bogorOne']->id)->where('asset_id', $secondAssetId)->first());
+        $this->assertSame(1, (int) (new DeviceModel())->find($fixture['bogorOne']->id)->asset_revision);
+        $this->assertSame(1, Database::connect()->table('outbox_events')
+            ->where('aggregate_id', $fixture['bogorOne']->id)->where('event_type', 'asset.revision.changed')->countAllResults());
+
+        $duplicate = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->postForm(
+            '/control/locations/' . $fixture['bogor']->public_id . '/studios/' . $fixture['bogorOne']->public_id . '/assets',
+            ['asset_ids' => [$fixture['asset']->public_id, 'c0000000-0000-4000-8000-000000000002']]
+        );
+        $duplicate->assertRedirectTo('/control/locations/' . $fixture['bogor']->public_id);
+        $this->assertSame(2, (new DeviceAssetModel())->where('device_id', $fixture['bogorOne']->id)->countAllResults());
+        $this->assertSame(1, (int) (new DeviceModel())->find($fixture['bogorOne']->id)->asset_revision);
+
+        $page = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->get('/control/locations/' . $fixture['bogor']->public_id);
+        $page->assertOK();
+        $page->assertSee('Assign Assets');
+        $page->assertSee('View Assets');
+        $page->assertSee('Studio Side Trailer');
+        $page->assertSee('Select all filtered');
     }
 
     /** @return array<string,mixed> */

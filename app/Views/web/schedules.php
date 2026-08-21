@@ -2,6 +2,10 @@
 <?php
 $editingItems = $editing['items'] ?? [];
 $formDevice = (string) old('device_id', $editing['device_public_id'] ?? '');
+$formDevices = old('device_ids', array_column($editing['targets'] ?? [], 'public_id'));
+$formDevices = is_array($formDevices) ? array_values(array_unique(array_map('strval', $formDevices))) : [];
+if ($formDevices === [] && $formDevice !== '') $formDevices[] = $formDevice;
+$formTimezone = (string) old('timezone', $editing['timezone'] ?? 'Asia/Jakarta');
 $formTitle = (string) old('title', $editing['title'] ?? '');
 $formDescription = (string) old('description', $editing['description'] ?? '');
 $formStart = (string) old('start_at', $editing['start_local'] ?? '');
@@ -18,16 +22,29 @@ if (is_array($oldKeys)) {
 } else {
     foreach ($editingItems as $item) $initialItems[] = ['mediaKey' => $item['media_key'], 'durationMs' => (int) $item['duration_override_ms']];
 }
+$deviceGroups = [];
+$availableTimezones = ['Asia/Jakarta' => 'Asia/Jakarta'];
+foreach ($devices as $device) {
+    $locationKey = (string) ($device['locationId'] ?: 'unassigned');
+    if (! isset($deviceGroups[$locationKey])) $deviceGroups[$locationKey] = [
+        'name' => (string) ($device['location'] ?: 'No Location'), 'code' => (string) ($device['locationCode'] ?? ''), 'devices' => [],
+    ];
+    $deviceGroups[$locationKey]['devices'][] = $device;
+    $availableTimezones[(string) $device['timezone']] = (string) $device['timezone'];
+}
 ?>
-<section class="card schedule-editor">
-  <div class="card-heading"><div><p><?= $editing ? 'EDIT SCHEDULE' : 'NEW SCHEDULE' ?></p><h2><?= $editing ? esc($editing['title']) : 'Create a playback schedule' ?></h2></div><?php if ($editing): ?><a class="btn ghost" href="<?= site_url('control/schedules') ?>">Cancel edit</a><?php endif ?></div>
-  <?php if ($devices === []): ?><div class="alert error">Create and pair an active Studio before adding schedules.</div><?php endif ?>
-  <form id="scheduleForm" method="post" action="<?= $editing ? site_url('control/schedules/' . rawurlencode($editing['public_id']) . '/update') : site_url('control/schedules') ?>" class="schedule-form">
-    <?= csrf_field() ?>
+<div class="cms-page-toolbar"><div><p>DELIVERY PLAN</p><h2>Playback schedules</h2><span>Create one-time, daily, or weekly playlists for one or more Studios.</span></div><div class="cms-toolbar-actions"><span class="count"><?= count($schedules) ?> Schedules</span><button class="btn primary" type="button" data-cms-modal-open="schedule-editor-modal" <?= $devices === [] ? 'disabled title="Pair an active Studio first"' : '' ?>>+ Create Schedule</button></div></div>
+<?php if ($devices === []): ?><div class="alert error">Create and pair an active Studio before adding schedules.</div><?php endif ?>
+<dialog class="cms-action-modal full" id="schedule-editor-modal" data-cms-modal <?= $editing || old('_modal_context') === 'schedule-editor' ? 'data-auto-open="true"' : '' ?>>
+  <form id="scheduleForm" method="post" action="<?= $editing ? site_url('control/schedules/' . rawurlencode($editing['public_id']) . '/update') : site_url('control/schedules') ?>" class="cms-modal-shell schedule-form schedule-modal-form">
+    <?= csrf_field() ?><input type="hidden" name="_modal_context" value="schedule-editor">
+    <header class="cms-modal-header"><div><p><?= $editing ? 'EDIT SCHEDULE' : 'NEW SCHEDULE' ?></p><h2><?= $editing ? esc($editing['title']) : 'Create a playback schedule' ?></h2><span>Build the playlist and delivery rules without leaving the schedule overview.</span></div><?php if ($editing): ?><a class="cms-modal-x" href="<?= site_url('control/schedules') ?>" aria-label="Cancel edit">×</a><?php else: ?><button class="cms-modal-x" type="button" data-cms-modal-close aria-label="Close">×</button><?php endif ?></header>
+    <div class="cms-modal-body schedule-modal-body">
     <div class="schedule-fields">
       <label>Schedule title<input name="title" value="<?= esc($formTitle) ?>" maxlength="255" placeholder="Morning playlist" required></label>
-      <label>Target Studio<select id="scheduleDevice" name="device_id" required><option value="">Choose a Studio</option><?php foreach ($devices as $device): ?><option value="<?= esc($device['id']) ?>" <?= $formDevice === $device['id'] ? 'selected' : '' ?>><?= $device['location'] ? esc($device['location']) . ' — ' : '' ?><?= esc($device['name']) ?></option><?php endforeach ?></select></label>
-      <label>Start time <span id="scheduleTimezone" class="field-note"></span><input type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" required></label>
+      <div class="schedule-target-field"><span class="schedule-field-label">Target Studios</span><details class="schedule-target-picker" id="scheduleTargetPicker"><summary><span id="scheduleTargetSummary">Choose one or more Studios</span><b aria-hidden="true">⌄</b></summary><div class="schedule-target-panel"><label class="schedule-target-search">Search Location or Studio<input type="search" id="scheduleTargetSearch" placeholder="Search Location or Studio…"></label><div class="schedule-target-groups"><?php foreach ($deviceGroups as $locationKey => $group): ?><details class="schedule-target-location" data-target-location data-search-text="<?= esc(mb_strtolower($group['name'] . ' ' . implode(' ', array_column($group['devices'], 'name'))), 'attr') ?>"><summary><label><input type="checkbox" data-target-location-check><span><strong><?= esc($group['name']) ?></strong><small><?= count($group['devices']) ?> Studio(s)<?= $group['code'] ? ' · ' . esc($group['code']) : '' ?></small></span></label><b aria-hidden="true">⌄</b></summary><div><?php foreach ($group['devices'] as $device): ?><label class="schedule-target-option" data-target-option data-search-text="<?= esc(mb_strtolower($group['name'] . ' ' . $device['name']), 'attr') ?>"><input type="checkbox" name="device_ids[]" value="<?= esc($device['id'], 'attr') ?>" data-target-device <?= in_array((string) $device['id'], $formDevices, true) ? 'checked' : '' ?>><span><strong><?= esc($device['name']) ?></strong><small><?= count($device['media']) ?> Ready media · <?= esc($device['timezone']) ?></small></span></label><?php endforeach ?></div></details><?php endforeach ?><div class="empty schedule-target-empty" id="scheduleTargetEmpty" hidden>No Location or Studio matches this search.</div></div></div></details></div>
+      <label>Schedule timezone<select id="scheduleTimezone" name="timezone" required><?php foreach ($availableTimezones as $timezone): ?><option value="<?= esc($timezone, 'attr') ?>" <?= $formTimezone === $timezone ? 'selected' : '' ?>><?= esc($timezone) ?></option><?php endforeach ?></select></label>
+      <label>Start time<input type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" required></label>
       <label>Priority<input type="number" name="priority" value="<?= esc($formPriority) ?>" min="-100" max="100"></label>
     </div>
     <div class="recurrence-panel">
@@ -37,19 +54,20 @@ if (is_array($oldKeys)) {
     </div>
     <label>Description (optional)<input name="description" value="<?= esc($formDescription) ?>" maxlength="1000" placeholder="Notes for this playback"></label>
     <div class="playlist-builder">
-      <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on this Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
+      <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on every selected Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
       <div class="media-picker-filters"><input id="mediaSearch" type="search" placeholder="Search media title"><select id="mediaTypeFilter"><option value="">All types</option><option value="featured">Featured</option><option value="ads">Ads</option><option value="trailer">Trailer</option><option value="local">Local media</option></select><select id="mediaGenreFilter"><option value="">All genres</option></select></div>
       <div class="playlist-picker"><select id="mediaPicker"><option value="">Select Ready media</option></select><button id="addMedia" type="button" class="btn ghost">Add to playlist</button></div>
       <div id="playlistRows" class="playlist-rows"></div>
-      <div id="playlistEmpty" class="empty">Choose a Studio, then add one or more Ready films.</div>
+      <div id="playlistEmpty" class="empty">Choose one or more Studios, then add media available on all of them.</div>
     </div>
     <label class="check-row"><input type="checkbox" name="loop_enabled" value="1" <?= (string) old('loop_enabled', !empty($editing['loop_enabled']) ? '1' : '0') === '1' ? 'checked' : '' ?>> Loop playlist until the schedule end time</label>
-    <div class="form-action"><button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>><?= $editing ? 'Save schedule' : 'Create schedule' ?></button></div>
+    </div>
+    <footer class="cms-modal-footer"><span>All selected Studios use this same absolute start time and playlist.</span><div><?php if ($editing): ?><a class="btn ghost" href="<?= site_url('control/schedules') ?>">Cancel</a><?php else: ?><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><?php endif ?><button class="btn primary" type="submit" <?= $devices === [] ? 'disabled' : '' ?>><?= $editing ? 'Save Schedule' : 'Create Schedule' ?></button></div></footer>
   </form>
-</section>
+</dialog>
 
 <section class="schedule-list">
-  <div class="section-heading"><div><p>DELIVERY PLAN</p><h2>All schedules</h2></div><span class="badge"><?= count($schedules) ?> schedules</span></div>
+  <div class="section-heading"><div><p>SCHEDULE DIRECTORY</p><h2>All schedules</h2></div><span class="badge"><?= count($schedules) ?> schedules</span></div>
   <?php if ($schedules === []): ?><article class="card empty">No schedules yet. Create one above and refresh the target Studio.</article><?php endif ?>
   <?php foreach ($schedules as $schedule):
     $tz = new DateTimeZone($schedule['timezone']);
@@ -65,19 +83,25 @@ if (is_array($oldKeys)) {
     if ($schedule['recurrence'] !== 'one_time') $repeatLabel .= !empty($recurrenceConfig['until']) ? ' · until ' . $recurrenceConfig['until'] : ' · no end date';
   ?>
     <article class="card schedule-card">
-      <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?></p></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div>
+      <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div>
+      <?php if ((int) $schedule['target_count'] > 1): ?><details class="schedule-card-targets"><summary>View <?= (int) $schedule['target_count'] ?> target Studios <span>⌄</span></summary><div><?php foreach ($schedule['targets'] as $target): ?><span><strong><?= esc($target['name']) ?></strong><small><?= esc($target['location'] ?: 'No Location') ?></small></span><?php endforeach ?></div></details><?php endif ?>
       <div class="schedule-meta"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i')) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span><span><small>PLAYLIST</small><?= count($schedule['items']) ?> items</span></div>
       <ol class="schedule-items"><?php foreach ($schedule['items'] as $item): ?><li><span><?= esc($item['title_snapshot']) ?></span><small><?= gmdate('H:i:s', intdiv((int) $item['duration_override_ms'], 1000)) ?></small></li><?php endforeach ?></ol>
-      <div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><button class="btn ghost" type="submit"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></form><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/delete') ?>"><?= csrf_field() ?><button class="btn danger" type="submit" onclick="return confirm('Delete this schedule from the CMS and Player cache on next refresh?')">Delete</button></form></div>
+      <div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div>
     </article>
+    <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
+    <dialog class="cms-action-modal" id="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/delete') ?>" class="cms-modal-shell"><?= csrf_field() ?><header class="cms-modal-header"><div><p>DANGER ZONE</p><h2>Delete <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message danger"><strong>This schedule will be permanently removed.</strong>All target Players remove it from their local schedule cache on the next refresh.</div></div><footer class="cms-modal-footer"><span>Permanent deletion</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn danger" type="submit">Delete Schedule</button></div></footer></form></dialog>
   <?php endforeach ?>
 </section>
 <script>
 (() => {
   const devices = <?= json_encode($devices, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
   const initial = <?= json_encode($initialItems, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
-  const byId = new Map(devices.map(device => [device.id, device]));
-  const deviceSelect = document.getElementById('scheduleDevice');
+  const byId = new Map(devices.map(device => [String(device.id), device]));
+  const targetPicker = document.getElementById('scheduleTargetPicker');
+  const targetSearch = document.getElementById('scheduleTargetSearch');
+  const targetChecks = [...document.querySelectorAll('[data-target-device]')];
+  const locationGroups = [...document.querySelectorAll('[data-target-location]')];
   const picker = document.getElementById('mediaPicker');
   const rows = document.getElementById('playlistRows');
   const recurrence = document.getElementById('scheduleRecurrence');
@@ -86,20 +110,45 @@ if (is_array($oldKeys)) {
   const mediaGenreFilter = document.getElementById('mediaGenreFilter');
   let playlist = [];
   const duration = ms => { const s = Math.max(0, Math.round(Number(ms) / 1000)); return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(v => String(v).padStart(2, '0')).join(':'); };
-  function selectedDevice() { return byId.get(deviceSelect.value) || null; }
-  function mediaMap() { return new Map((selectedDevice()?.media || []).map(item => [item.mediaKey, item])); }
+  function selectedDevices() { return targetChecks.filter(check => check.checked).map(check => byId.get(String(check.value))).filter(Boolean); }
+  function mediaMap() {
+    const selected = selectedDevices();
+    if (!selected.length) return new Map();
+    const common = new Map((selected[0].media || []).map(item => [item.mediaKey, item]));
+    for (const device of selected.slice(1)) {
+      const keys = new Set((device.media || []).map(item => item.mediaKey));
+      for (const key of common.keys()) if (!keys.has(key)) common.delete(key);
+    }
+    return common;
+  }
+  function updateLocationChecks() {
+    for (const group of locationGroups) {
+      const children = [...group.querySelectorAll('[data-target-device]')];
+      const checked = children.filter(child => child.checked).length;
+      const parent = group.querySelector('[data-target-location-check]');
+      parent.checked = checked > 0 && checked === children.length;
+      parent.indeterminate = checked > 0 && checked < children.length;
+    }
+  }
+  function updateTargetSummary() {
+    const selected = selectedDevices();
+    const summary = document.getElementById('scheduleTargetSummary');
+    if (!selected.length) summary.textContent = 'Choose one or more Studios';
+    else if (selected.length === 1) summary.textContent = `${selected[0].location} — ${selected[0].name}`;
+    else summary.textContent = `${selected.length} Studios across ${new Set(selected.map(device => device.location)).size} Locations`;
+    updateLocationChecks();
+  }
   function updateRecurrenceFields() {
     document.getElementById('weekdayFields').hidden = recurrence.value !== 'weekly';
     document.getElementById('recurrenceUntilField').hidden = recurrence.value === 'one_time';
   }
   function rebuildPicker() {
-    const device = selectedDevice();
-    document.getElementById('scheduleTimezone').textContent = device ? `(${device.timezone})` : '';
+    const available = mediaMap();
     picker.innerHTML = '<option value="">Select Ready media</option>';
     const search = mediaSearch.value.trim().toLowerCase(); const type = mediaTypeFilter.value; const genre = mediaGenreFilter.value;
-    for (const item of device?.media || []) { if (search && !`${item.title} ${item.filename}`.toLowerCase().includes(search)) continue; if (type && item.type !== type) continue; if (genre && !(item.genres || []).includes(genre)) continue; const option = document.createElement('option'); option.value = item.mediaKey; option.textContent = `${item.title} · ${String(item.type || 'local').toUpperCase()} · ${duration(item.durationMs)} · ${item.source === 'managed' ? 'Downloaded' : 'Media Folder'}`; picker.appendChild(option); }
+    for (const item of available.values()) { if (search && !`${item.title} ${item.filename}`.toLowerCase().includes(search)) continue; if (type && item.type !== type) continue; if (genre && !(item.genres || []).includes(genre)) continue; const option = document.createElement('option'); option.value = item.mediaKey; option.textContent = `${item.title} · ${String(item.type || 'local').toUpperCase()} · ${duration(item.durationMs)} · ${item.source === 'managed' ? 'Downloaded' : 'Media Folder'}`; picker.appendChild(option); }
   }
-  function rebuildGenreFilter() { const selected = mediaGenreFilter.value; const genres = [...new Set((selectedDevice()?.media || []).flatMap(item => item.genres || []))].sort(); mediaGenreFilter.innerHTML = '<option value="">All genres</option>'; for (const genre of genres) { const option = document.createElement('option'); option.value = genre; option.textContent = genre; mediaGenreFilter.appendChild(option); } if (genres.includes(selected)) mediaGenreFilter.value = selected; }
+  function rebuildGenreFilter() { const selected = mediaGenreFilter.value; const genres = [...new Set([...mediaMap().values()].flatMap(item => item.genres || []))].sort(); mediaGenreFilter.innerHTML = '<option value="">All genres</option>'; for (const genre of genres) { const option = document.createElement('option'); option.value = genre; option.textContent = genre; mediaGenreFilter.appendChild(option); } if (genres.includes(selected)) mediaGenreFilter.value = selected; }
   function render() {
     const available = mediaMap(); rows.innerHTML = '';
     playlist = playlist.filter(item => available.has(item.mediaKey));
@@ -118,11 +167,30 @@ if (is_array($oldKeys)) {
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal();
   }
   function updateTotal() { const available = mediaMap(); const total = playlist.reduce((sum, item) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
-  deviceSelect.addEventListener('change', () => { playlist = []; rebuildGenreFilter(); rebuildPicker(); render(); });
+  function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }
+  for (const check of targetChecks) check.addEventListener('change', targetsChanged);
+  for (const group of locationGroups) {
+    const parent = group.querySelector('[data-target-location-check]');
+    parent.addEventListener('click', event => event.stopPropagation());
+    parent.addEventListener('change', () => {
+      for (const child of group.querySelectorAll('[data-target-device]')) child.checked = parent.checked;
+      targetsChanged();
+    });
+  }
+  targetSearch.addEventListener('input', () => {
+    const query = targetSearch.value.trim().toLowerCase(); let visibleGroups = 0;
+    for (const group of locationGroups) {
+      let visibleOptions = 0;
+      for (const option of group.querySelectorAll('[data-target-option]')) { const visible = !query || option.dataset.searchText.includes(query); option.hidden = !visible; if (visible) visibleOptions++; }
+      const visible = !query || group.dataset.searchText.includes(query) || visibleOptions > 0; group.hidden = !visible; if (visible) { visibleGroups++; if (query) group.open = true; }
+    }
+    document.getElementById('scheduleTargetEmpty').hidden = visibleGroups > 0;
+  });
+  document.addEventListener('click', event => { if (targetPicker.open && !targetPicker.contains(event.target)) targetPicker.open = false; });
   mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
   recurrence.addEventListener('change', updateRecurrenceFields);
-  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs }); picker.value = ''; render(); };
-  rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
+  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs }); picker.value = ''; render(); };
+  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
 })();
 </script>
 <?= view('web/_layout_bottom') ?>

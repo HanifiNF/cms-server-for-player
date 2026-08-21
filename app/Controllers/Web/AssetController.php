@@ -30,6 +30,7 @@ class AssetController extends BaseController
 
     public function index(): RedirectResponse
     {
+        session()->keepFlashdata(['success', 'error', 'errors', 'modal']);
         $query = trim((string) $this->request->getServer('QUERY_STRING'));
         return redirect()->to('/control/library' . ($query !== '' ? '?' . $query : ''));
     }
@@ -278,20 +279,20 @@ class AssetController extends BaseController
     {
         try {
             (new AssetTaxonomyService())->createGenre((string) $this->request->getPost('name'), (int) session()->get('cms_web_user_id'));
-            return redirect()->to('/control/assets')->with('success', 'Genre created and is now available in asset forms.');
+            return redirect()->to('/control/assets')->with('success', 'Genre created and is now available in asset forms.')->with('modal', 'genre-manager-modal');
         } catch (RuntimeException $error) {
-            return redirect()->to('/control/assets')->with('error', $error->getMessage());
+            return redirect()->to('/control/assets')->with('error', $error->getMessage())->with('modal', 'genre-manager-modal');
         }
     }
 
     public function genreStatus(string $publicId): RedirectResponse
     {
         $genre = (new GenreModel())->where('public_id', $publicId)->first();
-        if ($genre === null) return redirect()->to('/control/assets')->with('error', 'Genre was not found.');
+        if ($genre === null) return redirect()->to('/control/assets')->with('error', 'Genre was not found.')->with('modal', 'genre-manager-modal');
         $status = (string) $this->request->getPost('status');
-        if (! in_array($status, ['active', 'inactive'], true)) return redirect()->to('/control/assets')->with('error', 'Genre status is invalid.');
-        if (! (new GenreModel())->update($genre->id, ['status' => $status])) return redirect()->to('/control/assets')->with('error', 'Genre status could not be updated.');
-        return redirect()->to('/control/assets')->with('success', 'Genre status updated. Existing film metadata is preserved.');
+        if (! in_array($status, ['active', 'inactive'], true)) return redirect()->to('/control/assets')->with('error', 'Genre status is invalid.')->with('modal', 'genre-manager-modal');
+        if (! (new GenreModel())->update($genre->id, ['status' => $status])) return redirect()->to('/control/assets')->with('error', 'Genre status could not be updated.')->with('modal', 'genre-manager-modal');
+        return redirect()->to('/control/assets')->with('success', 'Genre status updated. Existing film metadata is preserved.')->with('modal', 'genre-manager-modal');
     }
 
     public function assign(string $publicId): RedirectResponse

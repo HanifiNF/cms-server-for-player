@@ -60,7 +60,7 @@ class OperatorController extends BaseController
         if ($duplicate !== null) $errors['email'] = 'That email address is already registered.';
         if ($id === (int) session()->get('cms_web_user_id') && $data['role'] !== 'admin') $errors['role'] = 'You cannot remove your own administrator role.';
         if ($target->role === 'admin' && $data['role'] !== 'admin' && $this->activeAdminCount() <= 1) $errors['role'] = 'At least one active administrator must remain.';
-        if ($errors !== []) return redirect()->to('/control/operators')->with('errors', $errors);
+        if ($errors !== []) return redirect()->to('/control/operators')->withInput()->with('errors', $errors)->with('modal', 'edit-account-' . $id);
 
         $users->update($id, $data);
         return redirect()->to('/control/operators')->with('success', 'Account details updated.');
@@ -87,7 +87,7 @@ class OperatorController extends BaseController
         $users = new UserModel();
         if ($users->find($id) === null) return redirect()->to('/control/operators')->with('error', 'Account was not found.');
         $password = (string) $this->request->getPost('password');
-        if (mb_strlen($password) < 12) return redirect()->to('/control/operators')->with('error', 'Password must contain at least 12 characters.');
+        if (mb_strlen($password) < 12) return redirect()->to('/control/operators')->with('error', 'Password must contain at least 12 characters.')->with('modal', 'password-account-' . $id);
         $users->update($id, ['password_hash' => password_hash($password, PASSWORD_ARGON2ID)]);
         $this->revokeApiSessions($id);
         return redirect()->to('/control/operators')->with('success', 'Password updated and active API sessions revoked.');
