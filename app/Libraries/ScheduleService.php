@@ -42,6 +42,7 @@ class ScheduleService
             $assetMetadata[(int) $asset->id] = [
                 'type' => $asset->asset_type ?: 'featured',
                 'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
+                'expiresOn' => $asset->expires_on?->format('Y-m-d'),
             ];
         }
 
@@ -67,6 +68,7 @@ class ScheduleService
                     'durationMs' => $durationMs,
                     'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',
                     'genres' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['genres'] ?? []) : [],
+                    'expiresOn' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['expiresOn'] ?? null) : null,
                 ];
             }
             $result[] = [
@@ -353,15 +355,22 @@ class ScheduleService
         if ($totalDurationMs <= 0) $errors['playlist_duration'] = 'The playlist must have a valid total duration.';
         if ($totalDurationMs > 86400000) $errors['playlist_duration'] = 'A recurring playlist may not exceed 24 hours in total.';
 
+        $earliestExpiration = null;
+        if ($expirationDates !== []) {
+            sort($expirationDates);
+            $earliestExpiration = $expirationDates[0];
+            if ($recurrenceType !== 'one_time' && $untilInput === '') {
+                $until = DateTimeImmutable::createFromFormat('!Y-m-d', $earliestExpiration, $timezone) ?: null;
+            }
+        }
+
         if ($errors !== []) throw new ScheduleValidationException($errors);
         if ($until !== null && $until->format('Y-m-d') < $start->format('Y-m-d')) {
             throw new ScheduleValidationException(['recurrence_until' => 'The recurrence end date cannot be before its first occurrence.']);
         }
         $startUtc = $start->setTimezone(new DateTimeZone('UTC'));
         $endUtc = $startUtc->modify('+' . $totalDurationMs . ' milliseconds');
-        if ($expirationDates !== []) {
-            sort($expirationDates);
-            $earliestExpiration = $expirationDates[0];
+        if ($earliestExpiration !== null) {
             $deadline = $expiryService->deadlineUtc($earliestExpiration);
             if ($recurrenceType === 'one_time' && $endUtc > $deadline) {
                 throw new ScheduleValidationException(['playlist' => "This schedule ends after a film expires on {$earliestExpiration}."]);

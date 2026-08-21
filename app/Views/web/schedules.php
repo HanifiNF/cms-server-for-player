@@ -12,6 +12,8 @@ $formStart = (string) old('start_at', $editing['start_local'] ?? '');
 $formPriority = (string) old('priority', $editing['priority'] ?? '0');
 $formRecurrence = (string) old('recurrence', $editing['recurrence'] ?? 'one_time');
 $formUntil = (string) old('recurrence_until', $editing['recurrence_values']['until'] ?? '');
+$formAutoExpiry = old('auto_expiry_until');
+if ($formAutoExpiry === null) $formAutoExpiry = $editing ? '0' : '1';
 $formDays = old('days_of_week', $editing['recurrence_values']['daysOfWeek'] ?? []);
 $formDays = is_array($formDays) ? array_map('intval', $formDays) : [];
 $oldKeys = old('media_keys');
@@ -47,10 +49,10 @@ foreach ($devices as $device) {
       <label>Start time<input type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" required></label>
       <label>Priority<input type="number" name="priority" value="<?= esc($formPriority) ?>" min="-100" max="100"></label>
     </div>
-    <div class="recurrence-panel">
-      <label>Repeat<select id="scheduleRecurrence" name="recurrence"><option value="one_time" <?= $formRecurrence === 'one_time' ? 'selected' : '' ?>>One time</option><option value="daily" <?= $formRecurrence === 'daily' ? 'selected' : '' ?>>Daily</option><option value="weekly" <?= $formRecurrence === 'weekly' ? 'selected' : '' ?>>Weekly</option></select></label>
+    <div class="recurrence-panel" id="scheduleRecurrencePanel" data-mode="<?= esc($formRecurrence, 'attr') ?>">
+      <label class="schedule-repeat-field">Repeat<select id="scheduleRecurrence" name="recurrence"><option value="one_time" <?= $formRecurrence === 'one_time' ? 'selected' : '' ?>>One time</option><option value="daily" <?= $formRecurrence === 'daily' ? 'selected' : '' ?>>Daily</option><option value="weekly" <?= $formRecurrence === 'weekly' ? 'selected' : '' ?>>Weekly</option></select></label>
       <fieldset id="weekdayFields"><legend>Play on</legend><div class="weekday-options"><?php foreach ([1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'] as $day => $name): ?><label><input type="checkbox" name="days_of_week[]" value="<?= $day ?>" <?= in_array($day, $formDays, true) ? 'checked' : '' ?>><?= $name ?></label><?php endforeach ?></div></fieldset>
-      <label id="recurrenceUntilField">End date <span class="field-note">(optional; blank means never)</span><input type="date" name="recurrence_until" value="<?= esc($formUntil) ?>"></label>
+      <div id="recurrenceUntilField" class="schedule-until-field"><label><span class="schedule-until-label">End date <small class="field-note">(optional when every film has no expiry)</small></span><input id="scheduleRecurrenceUntil" type="date" name="recurrence_until" value="<?= esc($formUntil) ?>"></label><input type="hidden" name="auto_expiry_until" value="0"><div class="schedule-auto-expiry-field"><span>Expiry policy</span><label class="schedule-auto-expiry"><input id="scheduleAutoExpiry" type="checkbox" name="auto_expiry_until" value="1" <?= (string) $formAutoExpiry === '1' ? 'checked' : '' ?>> Use the earliest film expiry automatically</label></div><small id="scheduleExpiryHint" class="schedule-expiry-hint"></small></div>
     </div>
     <label>Description (optional)<input name="description" value="<?= esc($formDescription) ?>" maxlength="1000" placeholder="Notes for this playback"></label>
     <div class="playlist-builder">
@@ -105,6 +107,9 @@ foreach ($devices as $device) {
   const picker = document.getElementById('mediaPicker');
   const rows = document.getElementById('playlistRows');
   const recurrence = document.getElementById('scheduleRecurrence');
+  const recurrenceUntil = document.getElementById('scheduleRecurrenceUntil');
+  const autoExpiryUntil = document.getElementById('scheduleAutoExpiry');
+  const expiryHint = document.getElementById('scheduleExpiryHint');
   const mediaSearch = document.getElementById('mediaSearch');
   const mediaTypeFilter = document.getElementById('mediaTypeFilter');
   const mediaGenreFilter = document.getElementById('mediaGenreFilter');
@@ -139,8 +144,45 @@ foreach ($devices as $device) {
     updateLocationChecks();
   }
   function updateRecurrenceFields() {
+    document.getElementById('scheduleRecurrencePanel').dataset.mode = recurrence.value;
     document.getElementById('weekdayFields').hidden = recurrence.value !== 'weekly';
     document.getElementById('recurrenceUntilField').hidden = recurrence.value === 'one_time';
+    syncExpiryEndDate();
+  }
+  function earliestPlaylistExpiry() {
+    const available = mediaMap();
+    return playlist
+      .map(entry => available.get(entry.mediaKey))
+      .filter(item => item && /^\d{4}-\d{2}-\d{2}$/.test(String(item.expiresOn || '')))
+      .sort((left, right) => String(left.expiresOn).localeCompare(String(right.expiresOn)))[0] || null;
+  }
+  function syncExpiryEndDate() {
+    if (recurrence.value === 'one_time') {
+      recurrenceUntil.removeAttribute('max');
+      expiryHint.textContent = '';
+      expiryHint.classList.remove('warning');
+      return;
+    }
+    const limitingMedia = earliestPlaylistExpiry();
+    if (!limitingMedia) {
+      recurrenceUntil.removeAttribute('max');
+      if (autoExpiryUntil.checked && recurrenceUntil.dataset.autoValue && recurrenceUntil.value === recurrenceUntil.dataset.autoValue) recurrenceUntil.value = '';
+      delete recurrenceUntil.dataset.autoValue;
+      expiryHint.textContent = 'No film in this playlist has an expiry date. End date may remain blank.';
+      expiryHint.classList.remove('warning');
+      return;
+    }
+    const limit = String(limitingMedia.expiresOn);
+    recurrenceUntil.max = limit;
+    if (autoExpiryUntil.checked) {
+      recurrenceUntil.value = limit;
+      recurrenceUntil.dataset.autoValue = limit;
+    }
+    const tooLate = Boolean(recurrenceUntil.value && recurrenceUntil.value > limit);
+    expiryHint.textContent = tooLate
+      ? `End date must not pass ${limit}, the earliest expiry in this playlist (${limitingMedia.title}).`
+      : `Limited by ${limitingMedia.title}, which expires on ${limit}.`;
+    expiryHint.classList.toggle('warning', tooLate);
   }
   function rebuildPicker() {
     const available = mediaMap();
@@ -164,7 +206,7 @@ foreach ($devices as $device) {
       row.querySelector('[data-action=down]').onclick = () => { if (index < playlist.length - 1) [playlist[index + 1], playlist[index]] = [playlist[index], playlist[index + 1]]; render(); };
       row.querySelector('[data-action=remove]').onclick = () => { playlist.splice(index, 1); render(); }; rows.appendChild(row);
     });
-    document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal();
+    document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
   }
   function updateTotal() { const available = mediaMap(); const total = playlist.reduce((sum, item) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
   function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }
@@ -189,6 +231,11 @@ foreach ($devices as $device) {
   document.addEventListener('click', event => { if (targetPicker.open && !targetPicker.contains(event.target)) targetPicker.open = false; });
   mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
   recurrence.addEventListener('change', updateRecurrenceFields);
+  autoExpiryUntil.addEventListener('change', syncExpiryEndDate);
+  recurrenceUntil.addEventListener('input', () => {
+    if (autoExpiryUntil.checked && recurrenceUntil.value !== recurrenceUntil.dataset.autoValue) autoExpiryUntil.checked = false;
+    syncExpiryEndDate();
+  });
   document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs }); picker.value = ''; render(); };
   updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
 })();

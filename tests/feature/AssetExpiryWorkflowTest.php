@@ -7,6 +7,7 @@ use App\Models\AssetModel;
 use App\Models\AssetVersionModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
+use App\Models\ScheduleModel;
 use App\Models\UserModel;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
@@ -104,6 +105,68 @@ final class AssetExpiryWorkflowTest extends CIUnitTestCase
         (new ScheduleService())->create($payload, $fixture['adminId']);
     }
 
+    public function testRecurringScheduleAutomaticallyUsesItsFilmExpiration(): void
+    {
+        $timezone = new DateTimeZone('Asia/Jakarta');
+        $expiresOn = (new DateTimeImmutable('now', $timezone))->modify('+10 days')->format('Y-m-d');
+        $fixture = $this->fixture($expiresOn);
+        $service = new ScheduleService();
+
+        $devices = $service->readyMediaByDevice();
+        $this->assertSame($expiresOn, $devices[0]['media'][0]['expiresOn']);
+
+        $publicId = $service->create([
+            'title' => 'Auto-limited daily screening', 'description' => '',
+            'device_id' => $fixture['devicePublicId'],
+            'timezone' => 'Asia/Jakarta',
+            'start_at' => (new DateTimeImmutable('tomorrow 10:00', $timezone))->format('Y-m-d\TH:i'),
+            'recurrence' => 'daily', 'days_of_week' => [], 'recurrence_until' => '',
+            'priority' => 0, 'loop_enabled' => '0',
+            'media_keys' => ['managed:' . $fixture['publicId']], 'duration_ms' => ['60000'],
+        ], $fixture['adminId']);
+
+        $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
+        $config = json_decode((string) $schedule->recurrence_config, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame($expiresOn, $config['until']);
+    }
+
+    public function testRecurringPlaylistUsesTheNearestOfMultipleFilmExpirations(): void
+    {
+        $timezone = new DateTimeZone('Asia/Jakarta');
+        $laterExpiry = (new DateTimeImmutable('now', $timezone))->modify('+12 days')->format('Y-m-d');
+        $earlierExpiry = (new DateTimeImmutable('now', $timezone))->modify('+6 days')->format('Y-m-d');
+        $fixture = $this->fixture($laterExpiry);
+        $secondPublicId = 'c' . substr(bin2hex(random_bytes(18)), 1, 7) . '-3333-4333-8333-' . substr(bin2hex(random_bytes(6)), 0, 12);
+        $secondAssetId = (new AssetModel())->insert([
+            'public_id' => $secondPublicId, 'title' => 'Earlier Expiring Film', 'filename' => 'earlier.mp4',
+            'storage_key' => 'assets/earlier.mp4', 'mime_type' => 'video/mp4', 'size_bytes' => 2048,
+            'sha256' => str_repeat('c', 64), 'duration_ms' => 90000, 'status' => 'active',
+            'expires_on' => $earlierExpiry, 'created_by' => $fixture['adminId'],
+        ], true);
+        (new DeviceAssetModel())->insert([
+            'device_id' => $fixture['deviceId'], 'asset_id' => $secondAssetId,
+            'media_key' => 'managed:' . $secondPublicId, 'source' => 'managed',
+            'title' => 'Earlier Expiring Film', 'filename' => 'earlier.mp4', 'relative_path' => 'earlier.mp4',
+            'size_bytes' => 2048, 'duration_ms' => 90000, 'sha256' => str_repeat('c', 64),
+            'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
+        ]);
+
+        $start = new DateTimeImmutable('tomorrow 11:00', $timezone);
+        $publicId = (new ScheduleService())->create([
+            'title' => 'Nearest-expiry weekly screening', 'description' => '',
+            'device_id' => $fixture['devicePublicId'], 'timezone' => 'Asia/Jakarta',
+            'start_at' => $start->format('Y-m-d\TH:i'),
+            'recurrence' => 'weekly', 'days_of_week' => [(int) $start->format('N')], 'recurrence_until' => '',
+            'priority' => 0, 'loop_enabled' => '0',
+            'media_keys' => ['managed:' . $fixture['publicId'], 'managed:' . $secondPublicId],
+            'duration_ms' => ['60000', '90000'],
+        ], $fixture['adminId']);
+
+        $schedule = (new ScheduleModel())->where('public_id', $publicId)->first();
+        $config = json_decode((string) $schedule->recurrence_config, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame($earlierExpiry, $config['until']);
+    }
+
     /** @return array<string, mixed> */
     private function fixture(string $expiresOn): array
     {
@@ -137,6 +200,6 @@ final class AssetExpiryWorkflowTest extends CIUnitTestCase
             'relative_path' => 'licensed.mp4', 'size_bytes' => 1024, 'duration_ms' => 60000,
             'sha256' => str_repeat('a', 64), 'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
         ], true);
-        return compact('adminId', 'token', 'deviceId', 'devicePublicId', 'publicId', 'assetId', 'versionId', 'assignmentId');
+        return compact('adminId', 'token', 'deviceId', 'devicePublicId', 'publicId', 'assetId', 'versionId', 'assignmentId', 'expiresOn');
     }
 }
