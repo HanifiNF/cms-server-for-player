@@ -102,6 +102,9 @@ auth.loginAttemptsPerMinute = 5
 # The outbox remains durable when this is disabled. Enable this after the
 # Node.js realtime-gateway is configured so PostgreSQL can wake it immediately.
 realtime.enabled = false
+# Public Player-facing URL of the standalone Socket.IO gateway.
+# Use HTTPS in production, for example: https://realtime.example.com
+realtime.publicUrl = http://localhost:3001
 realtime.notificationChannel = player_realtime_outbox
 
 # Optional explicit ffprobe executable used for automatic film duration detection.

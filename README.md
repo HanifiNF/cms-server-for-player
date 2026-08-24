@@ -73,10 +73,10 @@ php spark serve
 
 The development server listens at `http://localhost:8080` by default.
 
-The first-stage Socket.IO service has its own setup and least-privilege database
+The Socket.IO service has its own setup and least-privilege database
 instructions in [`realtime-gateway/README.md`](realtime-gateway/README.md).
-The Electron Player remains on REST synchronization until its separate realtime
-integration stage is enabled.
+The Electron Player consumes realtime revision hints and retains REST heartbeat
+as the authoritative fallback.
 
 ### Run through Laragon Apache (recommended on Windows)
 
@@ -318,9 +318,10 @@ Asset lifecycle actions are intentionally separate:
   record. It is blocked while any Player assignment, pending removal, or
   schedule reference exists.
 
-Because Player-side Socket.IO integration is not enabled yet, running Players compare
-`asset_revision` and `schedule_revision` on every ten-second heartbeat. This
-delivers assignments, schedule changes, and removal requests automatically.
+Running Players receive revision hints through Socket.IO and immediately fetch
+the authoritative REST snapshot. They also compare `asset_revision` and
+`schedule_revision` on every ten-second heartbeat, so assignments, schedule
+changes, and removal requests still arrive when the gateway is unavailable.
 Manual refresh remains available for an immediate check.
 
 Production deployments should also run the idempotent expiry command every
@@ -344,8 +345,8 @@ overlaps (including recurring-versus-recurring) on the same Player, and
 increments `devices.schedule_revision` after every create,
 update, enable/disable, or delete operation.
 
-Until Player-side Socket.IO is enabled, the Player retrieves the authoritative snapshot on
-startup, when heartbeat revisions change, and on manual refresh:
+The Player retrieves the authoritative snapshot on startup, when a Socket.IO
+hint or heartbeat revision changes, and on manual refresh:
 
 ```text
 GET /api/player/schedules

@@ -64,6 +64,8 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
         $registrationData = json_decode($registration->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
         $this->assertNotSame('', $registrationData['token']);
         $this->assertSame($enrollmentData['device']['id'], $registrationData['device_id']);
+        $this->assertArrayHasKey('realtime_url', $registrationData);
+        $this->assertArrayHasKey('realtime_enabled', $registrationData);
 
         $reusedCode = $this->withBodyFormat('json')->post('/api/player/register', [
             ...$registrationPayload,
@@ -85,6 +87,9 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             'ldg_version' => 'ldg-v1',
         ]);
         $heartbeat->assertStatus(200);
+        $heartbeatData = json_decode($heartbeat->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
+        $this->assertArrayHasKey('realtime_url', $heartbeatData);
+        $this->assertArrayHasKey('realtime_enabled', $heartbeatData);
         $heartbeat->assertJSONFragment(['data' => [
             'device_id'         => $registrationData['device_id'],
             'device_name'       => 'Test Lobby Player',

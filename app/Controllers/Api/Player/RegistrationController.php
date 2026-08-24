@@ -11,6 +11,7 @@ use App\Libraries\LdgCryptoService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Config\Player;
+use Config\Realtime;
 use Throwable;
 
 class RegistrationController extends BaseController
@@ -77,6 +78,8 @@ class RegistrationController extends BaseController
                 'token'            => $result['token'],
                 'token_type'       => 'Bearer',
                 'heartbeat_interval_seconds' => 10,
+                'realtime_enabled' => config(Realtime::class)->playerUrl() !== null,
+                'realtime_url'     => config(Realtime::class)->playerUrl(),
             ],
         ]);
     }
@@ -114,6 +117,8 @@ class RegistrationController extends BaseController
             'device_id' => $result['device']->public_id, 'device_name' => $result['device']->name,
             'device_location' => $result['device']->location, 'device_timezone' => $result['device']->timezone,
             'token' => $result['token'], 'token_type' => 'Bearer', 'heartbeat_interval_seconds' => 10,
+            'realtime_enabled' => config(Realtime::class)->playerUrl() !== null,
+            'realtime_url' => config(Realtime::class)->playerUrl(),
         ]]);
     }
 

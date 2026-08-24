@@ -112,6 +112,8 @@ final class OperatorAuthApiTest extends CIUnitTestCase
         $this->assertSame('Assigned Lobby Player', $claimData['device_name']);
         $this->assertSame('Lobby', $claimData['device_location']);
         $this->assertSame('Asia/Jakarta', $claimData['device_timezone']);
+        $this->assertArrayHasKey('realtime_url', $claimData);
+        $this->assertArrayHasKey('realtime_enabled', $claimData);
 
         $controlAccess = $this->withHeaders(['Authorization' => 'Bearer ' . $operatorToken])
             ->withBodyFormat('json')->post('/api/operator/devices/' . $device['id'] . '/control-access', []);

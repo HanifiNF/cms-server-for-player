@@ -10,6 +10,7 @@ use App\Libraries\LdgCryptoService;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeZone;
 use Throwable;
+use Config\Realtime;
 
 class HeartbeatController extends BaseController
 {
@@ -74,6 +75,8 @@ class HeartbeatController extends BaseController
                 'asset_revision'    => $device->asset_revision,
                 'schedule_revision' => $device->schedule_revision,
                 'playback_state'    => $device->playback_state ?: 'unknown',
+                'realtime_enabled'  => config(Realtime::class)->playerUrl() !== null,
+                'realtime_url'      => config(Realtime::class)->playerUrl(),
             ],
         ]);
     }

@@ -1,10 +1,10 @@
 # Realtime Gateway
 
 Node.js Socket.IO gateway for the WirGroup CMS. This is the first realtime
-implementation stage: it authenticates paired Players, creates one room per
-Studio, consumes the PostgreSQL `outbox_events` table, and publishes revision
-hints. The Electron Player remains on REST heartbeat synchronization until the
-separate Player integration stage is enabled.
+implementation: it authenticates paired Players, creates one room per Studio,
+consumes the PostgreSQL `outbox_events` table, and publishes revision hints.
+The Electron Player consumes those hints while retaining REST heartbeat as its
+authoritative fallback.
 
 ## Reliability model
 
@@ -52,15 +52,18 @@ Edit `.env` with the dedicated PostgreSQL account before starting the service.
 Do not copy the entire CMS `.env`, because the gateway does not need the CMS
 encryption or administrator secrets.
 
-Then enable the low-latency PostgreSQL notification in the CMS `.env`:
+Then advertise the gateway and enable low-latency PostgreSQL notification in
+the CMS `.env`:
 
 ```ini
 realtime.enabled = true
+realtime.publicUrl = http://localhost:3001
 realtime.notificationChannel = player_realtime_outbox
 ```
 
-Both services must use the same notification channel. Polling remains active
-even if `realtime.enabled` is false.
+Both services must use the same notification channel. Use the LAN-reachable or
+public HTTPS gateway URL instead of `localhost` when Players run on other PCs.
+Polling remains active even if `realtime.enabled` is false.
 
 ## Endpoints
 
@@ -129,8 +132,11 @@ It does not trust the acknowledgement as the source of truth.
   after `OUTBOX_MAX_ATTEMPTS`.
 - Invalid or revoked token: the Socket.IO handshake is rejected.
 
-## Current stage boundary
+## Player behavior
 
-Do not enable `SOCKET_ENABLED` in the Electron Player yet. Player event handling,
-REST snapshot triggering, realtime status UI, and WSS deployment belong to the
-next implementation stages.
+Pairing and heartbeat responses advertise `realtime.publicUrl`. The Player
+stores the URL with its encrypted pairing credentials, joins `/player` using
+its token and Studio ID, and retrieves authoritative REST snapshots whenever a
+revision hint arrives. Socket failure never interrupts heartbeat, downloads,
+scheduling, or VLC playback. Production still requires HTTPS/WSS deployment and
+network-level hardening.
