@@ -17,5 +17,6 @@ class Asset extends Entity
         'ldg_chunk_size' => '?integer',
         'key_version' => 'integer',
         'encryption_revision' => '?integer',
+        'storage_profile_id' => '?integer',
     ];
 }

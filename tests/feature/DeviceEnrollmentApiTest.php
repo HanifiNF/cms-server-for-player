@@ -219,6 +219,7 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             $manifestData = json_decode($manifest->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'];
             $this->assertCount(1, $manifestData);
             $this->assertSame($publicId, $manifestData[0]['id']);
+            $this->assertSame('Remote Film', $manifestData[0]['title']);
             $this->assertSame('Remote Film.mp4', $manifestData[0]['filename']);
             $this->assertSame(strlen($content), $manifestData[0]['size']);
             $this->assertSame(2, $manifestData[0]['revision']);
@@ -256,13 +257,16 @@ final class DeviceEnrollmentApiTest extends CIUnitTestCase
             (new AssetModel())->update($assetId, ['duration_ms' => 0]);
             $durationSync = $this->withHeaders(['Authorization' => 'Bearer ' . $assignedToken])
                 ->withBodyFormat('json')->post('/api/player/assets/sync', ['assets' => [[
-                    'media_key' => 'managed:' . $publicId, 'source' => 'managed', 'title' => 'Remote Film',
-                    'filename' => 'Remote Film.mp4', 'relative_path' => 'Remote Film.mp4',
+                    'media_key' => 'managed:' . $publicId, 'source' => 'managed', 'title' => 'raw-upload-name',
+                    'filename' => 'raw-upload-name.ldg', 'relative_path' => 'raw-upload-name.ldg',
                     'size_bytes' => strlen($content), 'duration_ms' => 32100,
                     'sha256' => hash('sha256', $content), 'status' => 'ready', 'modified_at' => null,
                 ]]]);
             $durationSync->assertOK();
             $this->assertSame(32100, (int) (new AssetModel())->find($assetId)->duration_ms);
+            $catalogAssignment = (new DeviceAssetModel())->where('device_id', $assignedDeviceId)->where('asset_id', $assetId)->first();
+            $this->assertSame('Remote Film', $catalogAssignment->title);
+            $this->assertSame('Remote Film.mp4', $catalogAssignment->filename);
 
             $assignmentModel = new DeviceAssetModel();
             $assignedRow = $assignmentModel->where('device_id', $assignedDeviceId)->where('asset_id', $assetId)->first();

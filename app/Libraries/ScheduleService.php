@@ -40,6 +40,8 @@ class ScheduleService
             $assetPublicIds[(int) $asset->id] = $asset->public_id;
             if ($asset->status === 'active') $activeAssetIds[(int) $asset->id] = true;
             $assetMetadata[(int) $asset->id] = [
+                'title' => $asset->title,
+                'filename' => $asset->filename,
                 'type' => $asset->asset_type ?: 'featured',
                 'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
                 'expiresOn' => $asset->expires_on?->format('Y-m-d'),
@@ -62,8 +64,8 @@ class ScheduleService
                 $media[] = [
                     'mediaKey' => $item->media_key,
                     'assetId' => $item->asset_id !== null ? ($assetPublicIds[(int) $item->asset_id] ?? null) : null,
-                    'title' => $item->title,
-                    'filename' => $item->filename,
+                    'title' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['title'] ?? $item->title) : $item->title,
+                    'filename' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['filename'] ?? $item->filename) : $item->filename,
                     'source' => $item->source,
                     'durationMs' => $durationMs,
                     'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',
@@ -326,6 +328,7 @@ class ScheduleService
                 $errors["playlist.{$index}"] = 'A selected media item is not Ready on every selected Studio.';
                 continue;
             }
+            $titleSnapshot = (string) $asset->title;
             if ($asset->asset_id !== null) {
                 $catalogAsset = (new AssetModel())->find((int) $asset->asset_id);
                 if ($catalogAsset === null || $catalogAsset->status !== 'active') {
@@ -335,6 +338,7 @@ class ScheduleService
                 if ($catalogAsset->expires_on !== null) {
                     $expirationDates[] = $catalogAsset->expires_on->format('Y-m-d');
                 }
+                $titleSnapshot = (string) $catalogAsset->title;
             }
             $duration = filter_var($durations[$index] ?? null, FILTER_VALIDATE_INT);
             $duration = $duration === false ? 0 : (int) $duration;
@@ -348,7 +352,7 @@ class ScheduleService
                 'position' => $index,
                 'asset_id' => $asset->asset_id !== null ? (int) $asset->asset_id : null,
                 'media_key' => $key,
-                'title_snapshot' => $asset->title,
+                'title_snapshot' => $titleSnapshot,
                 'duration_override_ms' => $duration,
             ];
         }

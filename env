@@ -81,6 +81,14 @@ cms.enrollmentTtlMinutes = 15
 ldg.masterKey = 'dbKdjeBoSPlcUufenZfE4TxbzUhHTcVDfBllG8NvfxA='
 ldg.chunkSize = 4194304
 ldg.licenseHours = 24
+
+# Storage credential encryption. Generate a separate key with:
+# php -r "echo base64_encode(random_bytes(32)), PHP_EOL;"
+# Required in production before creating an FTPS profile.
+
+# storage.credentialsKey =
+storage.cacheTtlSeconds = 86400
+storage.cacheMaxBytes = 53687091200
 cms.offlineAfterSeconds = 30
 cms.enablePairingCode = false
 

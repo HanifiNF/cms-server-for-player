@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Libraries\AssetInventoryService;
 use App\Libraries\AssetExpiryService;
 use App\Libraries\LdgCryptoService;
+use App\Libraries\StorageManager;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\EnrollmentException;
 use App\Models\AssetModel;
@@ -122,6 +123,7 @@ class AssetController extends BaseController
             }
             $assets[] = [
                 'id' => $asset->public_id,
+                'title' => $asset->title,
                 'filename' => $encrypted ? $ldg->downloadFilename($asset) : $asset->filename,
                 'display_filename' => $asset->filename,
                 'download_url' => '/api/player/assets/' . rawurlencode($asset->public_id) . '/download',
@@ -196,12 +198,15 @@ class AssetController extends BaseController
             ->where('status !=', 'removal_pending')->first();
         if ($assignment === null) return $this->assetNotFound();
 
-        $storageRoot = realpath(WRITEPATH . 'uploads');
-        $candidate = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, (string) $asset->storage_key);
-        $filePath = realpath($candidate);
-        if ($storageRoot === false || $filePath === false
-            || ! str_starts_with($filePath, $storageRoot . DIRECTORY_SEPARATOR)
-            || ! is_file($filePath)) {
+        try {
+            $storage = new StorageManager();
+            $profile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+            $filePath = $storage->materialize($profile, (string) $asset->storage_key);
+        } catch (Throwable $error) {
+            log_message('error', 'Player asset storage resolution failed: {message}', ['message' => $error->getMessage()]);
+            $filePath = null;
+        }
+        if ($filePath === null || ! is_file($filePath)) {
             return $this->assetNotFound();
         }
         $size = filesize($filePath);

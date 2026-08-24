@@ -15,6 +15,7 @@ use App\Models\GenreModel;
 use App\Libraries\MediaMetadataService;
 use App\Libraries\LdgCryptoService;
 use App\Libraries\RealtimeOutboxService;
+use App\Libraries\StorageManager;
 use CodeIgniter\HTTP\RedirectResponse;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
@@ -59,26 +60,32 @@ class AssetController extends BaseController
         if (isset($posterInfo['error'])) return $this->uploadFailure($posterInfo['error']);
 
         $publicId = $this->uuidV4();
-        $storageDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
         $storedName = $publicId . '-r1.ldg';
-        $storedPath = $storageDir . DIRECTORY_SEPARATOR . $storedName;
-        $posterStoredPath = null;
+        $storageKey = 'assets/' . $storedName;
+        $storage = new StorageManager();
+        $profile = null;
+        $encryptedTemporaryPath = null;
+        $storedMedia = false;
+        $storedPosterKey = null;
         $mimeType = $file->getClientMimeType() ?: 'application/octet-stream';
         try {
-            if (! is_dir($storageDir) && ! mkdir($storageDir, 0775, true) && ! is_dir($storageDir)) throw new \RuntimeException('Asset storage directory could not be created.');
+            $profile = $storage->defaultProfile();
             $sourcePath = $file->getTempName();
             if ($sourcePath === '' || ! is_file($sourcePath)) throw new RuntimeException('Uploaded media temporary file was not found.');
             $durationMs = (new MediaMetadataService())->detectDurationMs($sourcePath);
-            $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $storedPath, $publicId, 1);
+            $encryptedTemporaryPath = $storage->temporaryPath('.ldg');
+            $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $encryptedTemporaryPath, $publicId, 1);
+            $storage->putFile($profile, $encryptedTemporaryPath, $storageKey);
+            $storedMedia = true;
             $posterValues = ['poster_storage_key' => null, 'poster_filename' => null, 'poster_mime_type' => null];
             if ($posterInfo !== []) {
-                $posterDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'posters';
-                if (! is_dir($posterDir) && ! mkdir($posterDir, 0775, true) && ! is_dir($posterDir)) throw new RuntimeException('Poster storage directory could not be created.');
                 $posterStoredName = $publicId . '.' . $posterInfo['extension'];
-                $poster->move($posterDir, $posterStoredName);
-                $posterStoredPath = $posterDir . DIRECTORY_SEPARATOR . $posterStoredName;
+                $posterSource = $poster->getTempName();
+                if ($posterSource === '' || ! is_file($posterSource)) throw new RuntimeException('Uploaded poster temporary file was not found.');
+                $storedPosterKey = 'posters/' . $posterStoredName;
+                $storage->putFile($profile, $posterSource, $storedPosterKey);
                 $posterValues = [
-                    'poster_storage_key' => 'posters/' . $posterStoredName,
+                    'poster_storage_key' => $storedPosterKey,
                     'poster_filename' => $posterInfo['filename'],
                     'poster_mime_type' => $posterInfo['mime_type'],
                 ];
@@ -87,7 +94,7 @@ class AssetController extends BaseController
             $status = $currentUser->role === 'distributor' ? 'draft' : 'active';
             $assetValues = [
                 'public_id' => $publicId, 'revision' => 1, ...$metadata, ...$posterValues, 'filename' => $filename,
-                'storage_key' => 'assets/' . $storedName, 'mime_type' => $mimeType,
+                'storage_key' => $storageKey, 'storage_profile_id' => (int) $profile->id, 'mime_type' => $mimeType,
                 ...$encryptionValues,
                 'duration_ms' => $durationMs, 'status' => $status,
                 'created_by' => (int) $currentUser->id,
@@ -99,7 +106,7 @@ class AssetController extends BaseController
             if ($taxonomyInput['ids'] !== null) (new AssetTaxonomyService($db))->sync($inserted, $taxonomyInput['ids']);
             $versionInserted = (new AssetVersionModel())->insert([
                 'asset_id' => $inserted, 'revision' => 1,
-                'filename' => $filename, 'storage_key' => 'assets/' . $storedName,
+                'filename' => $filename, 'storage_key' => $storageKey, 'storage_profile_id' => (int) $profile->id,
                 'mime_type' => $mimeType, ...$encryptionValues,
                 'duration_ms' => $durationMs, 'status' => $status === 'active' ? 'approved' : 'draft',
                 'metadata_snapshot' => $this->versionMetadataSnapshot($assetValues),
@@ -111,10 +118,12 @@ class AssetController extends BaseController
             $db->transCommit();
         } catch (Throwable $exception) {
             if (isset($db)) $db->transRollback();
-            if (is_file($storedPath)) @unlink($storedPath);
-            if ($posterStoredPath !== null && is_file($posterStoredPath)) @unlink($posterStoredPath);
+            if ($profile !== null && $storedMedia) try { $storage->delete($profile, $storageKey); } catch (Throwable) {}
+            if ($profile !== null && $storedPosterKey !== null) try { $storage->delete($profile, $storedPosterKey); } catch (Throwable) {}
             log_message('error', 'Asset upload failed: {message}', ['message' => $exception->getMessage()]);
             return $this->uploadFailure('The media asset could not be uploaded.', 500);
+        } finally {
+            if ($encryptedTemporaryPath !== null && is_file($encryptedTemporaryPath)) @unlink($encryptedTemporaryPath);
         }
         $message = $status === 'draft'
             ? 'Film encrypted as LDG v1, uploaded as Draft, and is waiting for administrator approval.'
@@ -150,16 +159,18 @@ class AssetController extends BaseController
         $posterInfo = $this->posterInfo($poster);
         if (isset($posterInfo['error'])) return redirect()->to('/control/assets')->with('error', $posterInfo['error']);
 
-        $newPosterPath = null;
-        $oldPosterPath = $this->resolveStoredAssetPath((string) $asset->poster_storage_key);
+        $storage = new StorageManager();
+        $profile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+        $newPosterKey = null;
+        $oldPosterKey = (string) $asset->poster_storage_key;
         try {
             if ($posterInfo !== []) {
-                $posterDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'posters';
-                if (! is_dir($posterDir) && ! mkdir($posterDir, 0775, true) && ! is_dir($posterDir)) throw new RuntimeException('Poster storage directory could not be created.');
                 $storedName = $asset->public_id . '-' . bin2hex(random_bytes(6)) . '.' . $posterInfo['extension'];
-                $poster->move($posterDir, $storedName);
-                $newPosterPath = $posterDir . DIRECTORY_SEPARATOR . $storedName;
-                $metadata['poster_storage_key'] = 'posters/' . $storedName;
+                $posterSource = $poster->getTempName();
+                if ($posterSource === '' || ! is_file($posterSource)) throw new RuntimeException('Uploaded poster temporary file was not found.');
+                $newPosterKey = 'posters/' . $storedName;
+                $storage->putFile($profile, $posterSource, $newPosterKey);
+                $metadata['poster_storage_key'] = $newPosterKey;
                 $metadata['poster_filename'] = $posterInfo['filename'];
                 $metadata['poster_mime_type'] = $posterInfo['mime_type'];
             }
@@ -178,11 +189,13 @@ class AssetController extends BaseController
             $db->transCommit();
         } catch (Throwable $exception) {
             if (isset($db)) $db->transRollback();
-            if ($newPosterPath !== null && is_file($newPosterPath)) @unlink($newPosterPath);
+            if ($newPosterKey !== null) try { $storage->delete($profile, $newPosterKey); } catch (Throwable) {}
             log_message('error', 'Asset metadata update failed: {message}', ['message' => $exception->getMessage()]);
             return redirect()->to('/control/assets')->with('error', 'Film metadata could not be updated.');
         }
-        if ($newPosterPath !== null && $oldPosterPath !== null && is_file($oldPosterPath)) @unlink($oldPosterPath);
+        if ($newPosterKey !== null && $oldPosterKey !== '') try { $storage->delete($profile, $oldPosterKey); } catch (Throwable $error) {
+            log_message('error', 'Old asset poster cleanup failed: {message}', ['message' => $error->getMessage()]);
+        }
         return redirect()->to('/control/assets')->with('success', 'Film metadata updated.');
     }
 
@@ -198,9 +211,13 @@ class AssetController extends BaseController
         $file = $this->request->getFile('media');
         $hasReplacement = $file !== null && $file->getError() !== UPLOAD_ERR_NO_FILE;
         $revision = max(1, (int) $asset->revision) + 1;
-        $newStoredPath = null;
+        $storage = new StorageManager();
+        $profile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+        $newStoredKey = null;
+        $newTemporaryPath = null;
         $fileValues = [
             'filename' => $asset->filename, 'storage_key' => $asset->storage_key,
+            'storage_profile_id' => (int) $profile->id,
             'mime_type' => $asset->mime_type, 'size_bytes' => $asset->size_bytes,
             'sha256' => $asset->sha256, 'duration_ms' => $asset->duration_ms,
             'encryption_format' => $asset->encryption_format,
@@ -221,17 +238,15 @@ class AssetController extends BaseController
                 $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
                 if (! in_array($extension, self::EXTENSIONS, true)) throw new RuntimeException('The replacement file type is not supported.');
                 if (mb_strlen($filename) > 255) throw new RuntimeException('The replacement filename is too long.');
-                $storageDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
-                if (! is_dir($storageDir) && ! mkdir($storageDir, 0775, true) && ! is_dir($storageDir)) {
-                    throw new RuntimeException('Asset storage directory could not be created.');
-                }
                 $storedName = $asset->public_id . '-r' . $revision . '.ldg';
-                $newStoredPath = $storageDir . DIRECTORY_SEPARATOR . $storedName;
+                $newStoredKey = 'assets/' . $storedName;
+                $newTemporaryPath = $storage->temporaryPath('.ldg');
                 $sourcePath = $file->getTempName();
                 if ($sourcePath === '' || ! is_file($sourcePath)) throw new RuntimeException('Replacement media temporary file was not found.');
-                $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $newStoredPath, (string) $asset->public_id, $revision);
+                $encryptionValues = (new LdgCryptoService())->encryptFile($sourcePath, $newTemporaryPath, (string) $asset->public_id, $revision);
+                $storage->putFile($profile, $newTemporaryPath, $newStoredKey);
                 $fileValues = [
-                    'filename' => $filename, 'storage_key' => 'assets/' . $storedName,
+                    'filename' => $filename, 'storage_key' => $newStoredKey, 'storage_profile_id' => (int) $profile->id,
                     'mime_type' => $file->getClientMimeType() ?: 'application/octet-stream',
                     ...$encryptionValues,
                     'duration_ms' => (new MediaMetadataService())->detectDurationMs($sourcePath),
@@ -254,9 +269,11 @@ class AssetController extends BaseController
             $db->transCommit();
         } catch (Throwable $error) {
             if (isset($db)) $db->transRollback();
-            if ($newStoredPath !== null && is_file($newStoredPath)) @unlink($newStoredPath);
+            if ($newStoredKey !== null) try { $storage->delete($profile, $newStoredKey); } catch (Throwable) {}
             log_message('error', 'Asset resubmission failed: {message}', ['message' => $error->getMessage()]);
             return redirect()->to('/control/assets')->with('error', $error->getMessage());
+        } finally {
+            if ($newTemporaryPath !== null && is_file($newTemporaryPath)) @unlink($newTemporaryPath);
         }
 
         return redirect()->to('/control/assets')->with('success', "Revision {$revision} submitted as Draft for administrator review.");
@@ -266,7 +283,8 @@ class AssetController extends BaseController
     {
         $asset = $this->accessibleAsset($publicId);
         if ($asset === null || $asset->poster_storage_key === null) return $this->response->setStatusCode(404);
-        $path = $this->resolveStoredAssetPath((string) $asset->poster_storage_key);
+        $profile = (new StorageManager())->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+        $path = (new StorageManager())->materialize($profile, (string) $asset->poster_storage_key);
         if ($path === null) return $this->response->setStatusCode(404);
         return $this->response->download($path, null)
             ->setFileName((string) ($asset->poster_filename ?: basename($path)))
@@ -644,28 +662,31 @@ class AssetController extends BaseController
             return redirect()->to('/control/assets')->with('error', 'This asset is referenced by a schedule and cannot be deleted.');
         }
 
-        $storageKeys = [(string) $asset->storage_key];
+        $storage = new StorageManager();
+        $objects = [];
+        $assetProfile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+        $objects[(int) $assetProfile->id . ':' . (string) $asset->storage_key] = [$assetProfile, (string) $asset->storage_key];
         foreach ((new AssetVersionModel())->where('asset_id', $asset->id)->findAll() as $version) {
-            $storageKeys[] = (string) $version->storage_key;
+            $profile = $storage->profile($version->storage_profile_id === null ? null : (int) $version->storage_profile_id);
+            $objects[(int) $profile->id . ':' . (string) $version->storage_key] = [$profile, (string) $version->storage_key];
         }
-        $originalPaths = [];
-        foreach (array_unique($storageKeys) as $storageKey) {
-            $path = $this->resolveStoredAssetPath($storageKey);
-            if ($path !== null) $originalPaths[$path] = $path;
+        if ((string) $asset->poster_storage_key !== '') {
+            $objects[(int) $assetProfile->id . ':' . (string) $asset->poster_storage_key] = [$assetProfile, (string) $asset->poster_storage_key];
         }
-        $posterPath = $this->resolveStoredAssetPath((string) $asset->poster_storage_key);
         $stagedFiles = [];
         $transactionStarted = false;
         try {
-            if ($originalPaths !== []) {
+            if ($objects !== []) {
                 $stagingDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . '.delete-staging';
                 if (! is_dir($stagingDir) && ! mkdir($stagingDir, 0775, true) && ! is_dir($stagingDir)) {
                     throw new RuntimeException('The deletion staging directory could not be created.');
                 }
-                foreach ($originalPaths as $originalPath) {
+                foreach ($objects as [$profile, $storageKey]) {
+                    $originalPath = $storage->materialize($profile, $storageKey);
+                    if ($originalPath === null) continue;
                     $stagedPath = $stagingDir . DIRECTORY_SEPARATOR . bin2hex(random_bytes(8)) . '-' . basename($originalPath);
                     if (! rename($originalPath, $stagedPath)) throw new RuntimeException('An asset revision file could not be staged for deletion.');
-                    $stagedFiles[] = ['original' => $originalPath, 'staged' => $stagedPath];
+                    $stagedFiles[] = ['original' => $originalPath, 'staged' => $stagedPath, 'profile' => $profile, 'key' => $storageKey];
                 }
             }
 
@@ -684,28 +705,24 @@ class AssetController extends BaseController
         }
 
         $cleanupFailed = false;
+        foreach ($objects as [$profile, $storageKey]) {
+            try {
+                $storage->delete($profile, $storageKey);
+            } catch (Throwable $error) {
+                $cleanupFailed = true;
+                log_message('error', 'Deleted asset storage cleanup failed: {message}', ['message' => $error->getMessage()]);
+            }
+        }
         foreach ($stagedFiles as $stagedFile) {
             if (is_file($stagedFile['staged']) && ! @unlink($stagedFile['staged'])) {
                 $cleanupFailed = true;
                 log_message('error', 'Deleted asset revision remains in staging: {path}', ['path' => $stagedFile['staged']]);
             }
         }
-        if ($posterPath !== null && is_file($posterPath) && ! @unlink($posterPath)) {
-            log_message('error', 'Deleted asset poster remains on disk: {path}', ['path' => $posterPath]);
-        }
         if ($cleanupFailed) {
             return redirect()->to('/control/assets')->with('error', 'The database record was deleted, but one or more staged revision files require manual cleanup.');
         }
         return redirect()->to('/control/assets')->with('success', 'Asset file and database record permanently deleted.');
-    }
-
-    private function resolveStoredAssetPath(string $storageKey): ?string
-    {
-        if ($storageKey === '') return null;
-        $root = realpath(WRITEPATH . 'uploads');
-        $candidate = realpath(WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $storageKey));
-        if ($root === false || $candidate === false || ! str_starts_with($candidate, $root . DIRECTORY_SEPARATOR) || ! is_file($candidate)) return null;
-        return $candidate;
     }
 
     private function accessibleAsset(string $publicId): ?object
@@ -725,6 +742,7 @@ class AssetController extends BaseController
         $id = $model->insert([
             'asset_id' => $asset->id, 'revision' => $revision,
             'filename' => $asset->filename, 'storage_key' => $asset->storage_key,
+            'storage_profile_id' => $asset->storage_profile_id,
             'mime_type' => $asset->mime_type, 'size_bytes' => $asset->size_bytes,
             'sha256' => $asset->sha256, 'duration_ms' => $asset->duration_ms,
             'encryption_format' => $asset->encryption_format,

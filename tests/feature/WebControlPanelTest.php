@@ -6,6 +6,7 @@ use App\Models\AssetModel;
 use App\Models\AssetVersionModel;
 use App\Models\LocationModel;
 use App\Models\UserModel;
+use App\Models\StorageProfileModel;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
 use CodeIgniter\Test\FeatureTestTrait;
@@ -191,6 +192,46 @@ final class WebControlPanelTest extends CIUnitTestCase
             ->postForm('/control/locations/' . $location->public_id . '/studios/' . $device->public_id . '/delete', []);
         $deleted->assertRedirectTo('/control/locations/' . $location->public_id);
         $this->assertNull((new DeviceModel())->find($device->id));
+    }
+
+    public function testAdministratorCanManageStorageProfilesWithoutMovingExistingAssets(): void
+    {
+        $adminId = (new UserModel())->insert([
+            'email' => 'storage-admin@example.com', 'name' => 'Storage Admin',
+            'password_hash' => password_hash('Storage-Admin-Password-2026!', PASSWORD_ARGON2ID),
+            'role' => 'admin', 'status' => 'active',
+        ], true);
+        $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/storage');
+        $page->assertOK();
+        $page->assertSee('Storage Profiles');
+        $page->assertSee('Local Storage');
+        $page->assertSee('Company FTPS');
+        $page->assertSee('FTPS adapter available');
+
+        $root = 'storage/test-profile-' . bin2hex(random_bytes(4));
+        try {
+            $created = $this->withSession(['cms_web_user_id' => $adminId])->postForm('/control/storage', [
+                'name' => 'Test Archive', 'driver' => 'local', 'root' => $root,
+            ]);
+            $created->assertRedirectTo('/control/storage');
+            $profile = (new StorageProfileModel())->where('name', 'Test Archive')->first();
+            $this->assertNotNull($profile);
+            $this->assertSame('healthy', $profile->last_test_status);
+
+            $defaultChanged = $this->withSession(['cms_web_user_id' => $adminId])
+                ->postForm('/control/storage/' . $profile->public_id . '/default', []);
+            $defaultChanged->assertRedirectTo('/control/storage');
+            $this->assertTrue((new StorageProfileModel())->find($profile->id)->is_default);
+            $this->assertFalse((new StorageProfileModel())->where('name', 'Local Storage')->first()->is_default);
+
+            $blockedDisable = $this->withSession(['cms_web_user_id' => $adminId])
+                ->postForm('/control/storage/' . $profile->public_id . '/status', ['status' => 'disabled']);
+            $blockedDisable->assertRedirectTo('/control/storage');
+            $this->assertSame('active', (new StorageProfileModel())->find($profile->id)->status);
+        } finally {
+            $path = rtrim(WRITEPATH, '\\/') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $root);
+            if (is_dir($path)) @rmdir($path);
+        }
     }
 
     /** @param array<string, mixed> $data */

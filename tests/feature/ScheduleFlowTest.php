@@ -47,6 +47,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertCount(2, $items);
         $this->assertSame([$fixture['localKey'], $fixture['managedKey']], array_column($items, 'media_key'));
         $this->assertSame([45000, 90000], array_map('intval', array_column($items, 'duration_override_ms')));
+        $this->assertSame(['Local Campaign', 'Managed Campaign'], array_column($items, 'title_snapshot'));
 
         $device = (new DeviceModel())->find($fixture['device']->id);
         $this->assertSame(1, (int) $device->schedule_revision);
@@ -260,7 +261,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
         ]);
         $assetModel->insert([
             'device_id' => $deviceId, 'asset_id' => $assetId, 'media_key' => $managedKey, 'source' => 'managed',
-            'title' => 'Managed Campaign', 'filename' => 'managed.mp4', 'relative_path' => 'managed.mp4',
+            'title' => 'raw-managed-upload', 'filename' => 'raw-managed-upload.ldg', 'relative_path' => 'raw-managed-upload.ldg',
             'size_bytes' => 2048, 'duration_ms' => 90000, 'sha256' => str_repeat('a', 64),
             'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
         ]);
@@ -292,7 +293,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
             $asset = (new AssetModel())->where('public_id', $fixture['assetPublicId'])->first();
             $assets->insert([
                 'device_id' => $deviceId, 'asset_id' => $asset->id, 'media_key' => $fixture['managedKey'], 'source' => 'managed',
-                'title' => 'Managed Campaign', 'filename' => 'managed.mp4', 'relative_path' => 'managed.mp4',
+                'title' => 'raw-managed-upload', 'filename' => 'raw-managed-upload.ldg', 'relative_path' => 'raw-managed-upload.ldg',
                 'size_bytes' => 2048, 'duration_ms' => 90000, 'sha256' => str_repeat('a', 64),
                 'status' => 'ready', 'last_reported_at' => gmdate('Y-m-d H:i:s'),
             ]);

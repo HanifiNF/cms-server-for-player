@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="<?= base_url('assets/cms-locations.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-locations.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-library.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-library.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-modal.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-modal.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-storage.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-storage.css') ?: 1) ?>">
 </head>
 <body>
 <div class="app-shell">
@@ -24,6 +25,7 @@
       <a class="<?= ($active ?? '') === 'library' ? 'active' : '' ?>" href="<?= site_url('control/library') ?>">▤ <span>Media Library</span></a>
       <?php if ($admin->role === 'admin'): ?>
       <a class="<?= ($active ?? '') === 'schedules' ? 'active' : '' ?>" href="<?= site_url('control/schedules') ?>">◷ <span>Schedules</span></a>
+      <a class="<?= ($active ?? '') === 'storage' ? 'active' : '' ?>" href="<?= site_url('control/storage') ?>">▣ <span>Storage</span></a>
       <?php endif ?>
     </nav>
     <div class="sidebar-footer">

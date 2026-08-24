@@ -91,8 +91,12 @@ class AssetInventoryService
                     'asset_id'         => $assetId,
                     'media_key'        => $mediaKey,
                     'source'           => $asset['source'],
-                    'title'            => $asset['title'],
-                    'filename'         => $asset['filename'],
+                    // Managed metadata belongs to the CMS catalog. A Player
+                    // reports file health and local storage details, but an old
+                    // client must never replace the operator-facing film title
+                    // with a raw filename-derived value.
+                    'title'            => $catalogAsset?->title ?? $asset['title'],
+                    'filename'         => $catalogAsset?->filename ?? $asset['filename'],
                     'relative_path'    => $asset['relative_path'],
                     'size_bytes'       => $asset['size_bytes'],
                     'duration_ms'      => $asset['duration_ms'],

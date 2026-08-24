@@ -12,5 +12,6 @@ class AssetVersion extends Entity
         'revision' => 'integer', 'size_bytes' => 'integer', 'duration_ms' => 'integer',
         'plaintext_size_bytes' => '?integer', 'ldg_chunk_size' => '?integer',
         'key_version' => 'integer', 'encryption_revision' => '?integer',
+        'storage_profile_id' => '?integer',
     ];
 }

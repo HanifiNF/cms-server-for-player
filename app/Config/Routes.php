@@ -52,6 +52,13 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('assets/(:segment)/reject', 'Web\AssetController::reject/$1');
     $routes->post('genres', 'Web\AssetController::createGenre');
     $routes->post('genres/(:segment)/status', 'Web\AssetController::genreStatus/$1');
+    $routes->get('storage', 'Web\StorageController::index');
+    $routes->post('storage', 'Web\StorageController::create');
+    $routes->post('storage/(:segment)/default', 'Web\StorageController::makeDefault/$1');
+    $routes->post('storage/(:segment)/status', 'Web\StorageController::status/$1');
+    $routes->post('storage/(:segment)/test', 'Web\StorageController::test/$1');
+    $routes->post('storage/(:segment)/update', 'Web\StorageController::update/$1');
+    $routes->post('storage/(:segment)/delete', 'Web\StorageController::delete/$1');
     $routes->get('schedules', 'Web\ScheduleController::index');
     $routes->post('schedules', 'Web\ScheduleController::create');
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
