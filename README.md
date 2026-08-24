@@ -3,9 +3,9 @@
 CodeIgniter 4 application for managing media players, per-device media
 inventories, playlists, schedules, delivery acknowledgments, and audit logs.
 
-This directory contains the CMS and HTTP API. The Socket.IO realtime gateway
-will live in a separate sibling directory so PHP remains the source of truth
-for users, devices, assets, and schedules.
+This directory contains the CMS and HTTP API. The separate Node.js service in
+`realtime-gateway/` consumes the durable PostgreSQL outbox and hosts Socket.IO,
+while PHP remains the source of truth for users, devices, assets, and schedules.
 
 ## Requirements
 
@@ -72,6 +72,11 @@ php spark serve
 ```
 
 The development server listens at `http://localhost:8080` by default.
+
+The first-stage Socket.IO service has its own setup and least-privilege database
+instructions in [`realtime-gateway/README.md`](realtime-gateway/README.md).
+The Electron Player remains on REST synchronization until its separate realtime
+integration stage is enabled.
 
 ### Run through Laragon Apache (recommended on Windows)
 
@@ -313,7 +318,7 @@ Asset lifecycle actions are intentionally separate:
   record. It is blocked while any Player assignment, pending removal, or
   schedule reference exists.
 
-Because the Socket.IO gateway is not enabled yet, running Players compare
+Because Player-side Socket.IO integration is not enabled yet, running Players compare
 `asset_revision` and `schedule_revision` on every ten-second heartbeat. This
 delivers assignments, schedule changes, and removal requests automatically.
 Manual refresh remains available for an immediate check.
@@ -339,7 +344,7 @@ overlaps (including recurring-versus-recurring) on the same Player, and
 increments `devices.schedule_revision` after every create,
 update, enable/disable, or delete operation.
 
-Until Socket.IO is enabled, the Player retrieves the authoritative snapshot on
+Until Player-side Socket.IO is enabled, the Player retrieves the authoritative snapshot on
 startup, when heartbeat revisions change, and on manual refresh:
 
 ```text
@@ -367,7 +372,7 @@ The first migration creates:
 - `schedule_targets`: target player PCs
 - `schedule_items`: ordered playlist items
 - `schedule_deliveries`: per-device delivery and acknowledgment status
-- `outbox_events`: reliable handoff to the future Socket.IO gateway
+- `outbox_events`: reliable handoff to the Node.js Socket.IO gateway
 - `audit_logs`: operator and system activity history
 
 Application timestamps are written in UTC. Each schedule also stores the

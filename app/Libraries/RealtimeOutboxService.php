@@ -4,9 +4,10 @@ namespace App\Libraries;
 
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
+use Config\Realtime;
 use RuntimeException;
 
-/** Durable synchronization hints for the future Socket.IO gateway. */
+/** Durable synchronization hints for the Node.js Socket.IO gateway. */
 class RealtimeOutboxService
 {
     public function __construct(private ?BaseConnection $db = null)
@@ -42,5 +43,18 @@ class RealtimeOutboxService
             'updated_at' => gmdate('Y-m-d H:i:s'),
         ]);
         if (! $inserted) throw new RuntimeException('Realtime outbox event could not be queued.');
+
+        $this->notifyGateway();
+    }
+
+    private function notifyGateway(): void
+    {
+        $config = config(Realtime::class);
+        if (! $config->enabled || strtolower((string) $this->db->DBDriver) !== 'postgre') return;
+
+        // PostgreSQL delivers NOTIFY only after the surrounding transaction
+        // commits. The durable outbox remains authoritative if no listener is
+        // connected when the notification is published.
+        $this->db->query('SELECT pg_notify(?, ?)', [$config->notificationChannel, 'outbox']);
     }
 }
