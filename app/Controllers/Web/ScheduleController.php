@@ -97,6 +97,7 @@ class ScheduleController extends BaseController
             'recurrence_until' => $this->request->getPost('recurrence_until'),
             'priority' => $this->request->getPost('priority'), 'loop_enabled' => $this->request->getPost('loop_enabled'),
             'media_keys' => $this->request->getPost('media_keys'), 'duration_ms' => $this->request->getPost('duration_ms'),
+            'gap_after_ms' => $this->request->getPost('gap_after_ms'),
         ];
     }
 

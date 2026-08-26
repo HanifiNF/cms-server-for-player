@@ -1,4 +1,12 @@
 <?= view('web/_layout_top', get_defined_vars()) ?>
+<style>
+.playlist-row{grid-template-columns:30px minmax(150px,1fr) minmax(220px,.9fr) minmax(220px,.9fr) auto}
+.timeline-duration{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;min-width:0;margin:0;padding:8px;border:1px solid var(--line);border-radius:9px}
+.timeline-duration legend{padding:0 4px;color:var(--muted);font-size:11px;font-weight:800}.timeline-duration label{font-size:10px}.timeline-duration input{min-width:0;padding:8px}.film-gap{background:var(--surface-2)}
+.film-gap.inactive{opacity:.55}.film-gap.inactive legend::after{content:' (no next film)';font-weight:500}
+@media(max-width:1250px){.playlist-row{grid-template-columns:30px minmax(160px,1fr) minmax(220px,1fr)}.film-gap{grid-column:3}.playlist-controls{grid-column:2/4;justify-content:flex-end}}
+@media(max-width:700px){.playlist-row{grid-template-columns:1fr}.film-gap,.playlist-controls{grid-column:auto}.timeline-duration{width:100%}}
+</style>
 <?php
 $editingItems = $editing['items'] ?? [];
 $formDevice = (string) old('device_id', $editing['device_public_id'] ?? '');
@@ -18,11 +26,12 @@ $formDays = old('days_of_week', $editing['recurrence_values']['daysOfWeek'] ?? [
 $formDays = is_array($formDays) ? array_map('intval', $formDays) : [];
 $oldKeys = old('media_keys');
 $oldDurations = old('duration_ms');
+$oldGaps = old('gap_after_ms');
 $initialItems = [];
 if (is_array($oldKeys)) {
-    foreach (array_values($oldKeys) as $index => $key) $initialItems[] = ['mediaKey' => $key, 'durationMs' => (int) ($oldDurations[$index] ?? 0)];
+    foreach (array_values($oldKeys) as $index => $key) $initialItems[] = ['mediaKey' => $key, 'durationMs' => (int) ($oldDurations[$index] ?? 0), 'gapAfterMs' => (int) ($oldGaps[$index] ?? 0)];
 } else {
-    foreach ($editingItems as $item) $initialItems[] = ['mediaKey' => $item['media_key'], 'durationMs' => (int) $item['duration_override_ms']];
+    foreach ($editingItems as $item) $initialItems[] = ['mediaKey' => $item['media_key'], 'durationMs' => (int) $item['duration_override_ms'], 'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0)];
 }
 $deviceGroups = [];
 $availableTimezones = ['Asia/Jakarta' => 'Asia/Jakarta'];
@@ -88,7 +97,7 @@ foreach ($devices as $device) {
       <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div>
       <?php if ((int) $schedule['target_count'] > 1): ?><details class="schedule-card-targets"><summary>View <?= (int) $schedule['target_count'] ?> target Studios <span>⌄</span></summary><div><?php foreach ($schedule['targets'] as $target): ?><span><strong><?= esc($target['name']) ?></strong><small><?= esc($target['location'] ?: 'No Location') ?></small></span><?php endforeach ?></div></details><?php endif ?>
       <div class="schedule-meta"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i')) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span><span><small>PLAYLIST</small><?= count($schedule['items']) ?> items</span></div>
-      <ol class="schedule-items"><?php foreach ($schedule['items'] as $item): ?><li><span><?= esc($item['title_snapshot']) ?></span><small><?= gmdate('H:i:s', intdiv((int) $item['duration_override_ms'], 1000)) ?></small></li><?php endforeach ?></ol>
+      <ol class="schedule-items"><?php foreach ($schedule['items'] as $item): ?><li><span><?= esc($item['title_snapshot']) ?></span><small><?= gmdate('H:i:s', intdiv((int) $item['duration_override_ms'], 1000)) ?><?= (int) ($item['gap_after_ms'] ?? 0) > 0 ? ' · gap ' . gmdate('H:i:s', intdiv((int) $item['gap_after_ms'], 1000)) : '' ?></small></li><?php endforeach ?></ol>
       <div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div>
     </article>
     <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
@@ -196,19 +205,24 @@ foreach ($devices as $device) {
     playlist = playlist.filter(item => available.has(item.mediaKey));
     playlist.forEach((entry, index) => {
       const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row';
-      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><label>Duration (seconds)<input type="number" min="1" max="86400" step="1"></label><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up">↑</button><button type="button" class="btn ghost" data-action="down">↓</button><button type="button" class="btn danger" data-action="remove">×</button></span><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]">`;
+      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up">↑</button><button type="button" class="btn ghost" data-action="down">↓</button><button type="button" class="btn danger" data-action="remove">×</button></span><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
       row.querySelector('strong').textContent = media.title; row.querySelector('small').textContent = media.filename;
-      const seconds = row.querySelector('input[type=number]'); seconds.value = Math.max(1, Math.round((entry.durationMs || media.durationMs) / 1000));
       const durationHidden = row.querySelector('input[name="duration_ms[]"]');
-      row.querySelector('input[name="media_keys[]"]').value = entry.mediaKey; durationHidden.value = Number(seconds.value) * 1000;
-      seconds.addEventListener('input', () => { entry.durationMs = Math.max(0, Number(seconds.value) * 1000); durationHidden.value = entry.durationMs; updateTotal(); });
+      const gapHidden = row.querySelector('input[name="gap_after_ms[]"]');
+      row.querySelector('input[name="media_keys[]"]').value = entry.mediaKey;
+      const bindTime = (selector, initialMs, onChange) => { const box = row.querySelector(selector); const totalSeconds = Math.max(0, Math.round(Number(initialMs || 0) / 1000)); box.querySelector('[data-unit=hours]').value = Math.floor(totalSeconds / 3600); box.querySelector('[data-unit=minutes]').value = Math.floor(totalSeconds % 3600 / 60); box.querySelector('[data-unit=seconds]').value = totalSeconds % 60; const sync = () => { const h = Math.max(0, Number(box.querySelector('[data-unit=hours]').value) || 0); const m = Math.max(0, Math.min(59, Number(box.querySelector('[data-unit=minutes]').value) || 0)); const s = Math.max(0, Math.min(59, Number(box.querySelector('[data-unit=seconds]').value) || 0)); onChange((h * 3600 + m * 60 + s) * 1000); }; box.querySelectorAll('input').forEach(input => input.addEventListener('input', sync)); sync(); };
+      bindTime('[data-time=duration]', entry.durationMs || media.durationMs, value => { entry.durationMs = value; durationHidden.value = value; updateTotal(); });
+      bindTime('[data-time=gap]', entry.gapAfterMs || 0, value => { entry.gapAfterMs = value; gapHidden.value = value; updateTotal(); });
+      const gapActive = index < playlist.length - 1 || document.querySelector('input[name=loop_enabled]')?.checked;
+      row.querySelector('.film-gap').classList.toggle('inactive', !gapActive);
+      row.querySelectorAll('.film-gap input').forEach(input => { input.disabled = !gapActive; });
       row.querySelector('[data-action=up]').onclick = () => { if (index > 0) [playlist[index - 1], playlist[index]] = [playlist[index], playlist[index - 1]]; render(); };
       row.querySelector('[data-action=down]').onclick = () => { if (index < playlist.length - 1) [playlist[index + 1], playlist[index]] = [playlist[index], playlist[index + 1]]; render(); };
       row.querySelector('[data-action=remove]').onclick = () => { playlist.splice(index, 1); render(); }; rows.appendChild(row);
     });
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
   }
-  function updateTotal() { const available = mediaMap(); const total = playlist.reduce((sum, item) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
+  function updateTotal() { const available = mediaMap(); const loop = document.querySelector('input[name=loop_enabled]')?.checked; const total = playlist.reduce((sum, item, index) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0) + ((index < playlist.length - 1 || loop) ? Number(item.gapAfterMs || 0) : 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
   function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }
   for (const check of targetChecks) check.addEventListener('change', targetsChanged);
   for (const group of locationGroups) {
@@ -232,12 +246,13 @@ foreach ($devices as $device) {
   mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
   recurrence.addEventListener('change', updateRecurrenceFields);
   autoExpiryUntil.addEventListener('change', syncExpiryEndDate);
+  document.querySelector('input[name=loop_enabled]')?.addEventListener('change', render);
   recurrenceUntil.addEventListener('input', () => {
     if (autoExpiryUntil.checked && recurrenceUntil.value !== recurrenceUntil.dataset.autoValue) autoExpiryUntil.checked = false;
     syncExpiryEndDate();
   });
-  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs }); picker.value = ''; render(); };
-  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs })); render();
+  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, gapAfterMs: 0 }); picker.value = ''; render(); };
+  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, gapAfterMs: item.gapAfterMs || 0 })); render();
 })();
 </script>
 <?= view('web/_layout_bottom') ?>

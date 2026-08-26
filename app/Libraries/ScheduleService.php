@@ -208,6 +208,7 @@ class ScheduleService
                     'mediaKey' => $item['media_key'],
                     'title' => $item['title_snapshot'],
                     'durationMs' => (int) $item['duration_override_ms'],
+                    'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0),
                     'order' => (int) $item['position'],
                 ];
                 if ($item['asset_public_id'] !== null) $entry['assetId'] = $item['asset_public_id'];
@@ -306,6 +307,7 @@ class ScheduleService
 
         $keys = is_array($input['media_keys'] ?? null) ? array_values($input['media_keys']) : [];
         $durations = is_array($input['duration_ms'] ?? null) ? array_values($input['duration_ms']) : [];
+        $gaps = is_array($input['gap_after_ms'] ?? null) ? array_values($input['gap_after_ms']) : [];
         if ($keys === []) $errors['playlist'] = 'Add at least one Ready media item.';
         if (count($keys) > 100) $errors['playlist'] = 'A playlist may contain at most 100 items.';
 
@@ -347,13 +349,21 @@ class ScheduleService
                 $errors["duration.{$index}"] = 'Each duration must be between 1 millisecond and 24 hours.';
                 continue;
             }
-            $totalDurationMs += $duration;
+            $gapAfterMs = filter_var($gaps[$index] ?? 0, FILTER_VALIDATE_INT);
+            $gapAfterMs = $gapAfterMs === false ? -1 : (int) $gapAfterMs;
+            if ($gapAfterMs < 0 || $gapAfterMs > 86400000) {
+                $errors["gap.{$index}"] = 'Each film gap must be between 0 milliseconds and 24 hours.';
+                continue;
+            }
+            $effectiveGapMs = ($index < count($keys) - 1 || (isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1')) ? $gapAfterMs : 0;
+            $totalDurationMs += $duration + $effectiveGapMs;
             $items[] = [
                 'position' => $index,
                 'asset_id' => $asset->asset_id !== null ? (int) $asset->asset_id : null,
                 'media_key' => $key,
                 'title_snapshot' => $titleSnapshot,
                 'duration_override_ms' => $duration,
+                'gap_after_ms' => $gapAfterMs,
             ];
         }
         if ($totalDurationMs <= 0) $errors['playlist_duration'] = 'The playlist must have a valid total duration.';

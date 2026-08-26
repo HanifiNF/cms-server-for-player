@@ -37,16 +37,19 @@ final class ScheduleFlowTest extends CIUnitTestCase
             'start_at' => $start, 'priority' => 5,
             'media_keys' => [$fixture['localKey'], $fixture['managedKey']],
             'duration_ms' => [45000, 90000],
+            'gap_after_ms' => [10000, 5000],
         ], $fixture['adminId']);
         $created->assertRedirectTo('/control/schedules');
 
         $schedule = (new ScheduleModel())->where('title', 'Jakarta Morning Playlist')->first();
         $this->assertNotNull($schedule);
         $this->assertSame(1, (int) $schedule->revision);
+        $this->assertSame(145, $schedule->end_at->getTimestamp() - $schedule->start_at->getTimestamp());
         $items = Database::connect()->table('schedule_items')->where('schedule_id', $schedule->id)->orderBy('position')->get()->getResultArray();
         $this->assertCount(2, $items);
         $this->assertSame([$fixture['localKey'], $fixture['managedKey']], array_column($items, 'media_key'));
         $this->assertSame([45000, 90000], array_map('intval', array_column($items, 'duration_override_ms')));
+        $this->assertSame([10000, 5000], array_map('intval', array_column($items, 'gap_after_ms')));
         $this->assertSame(['Local Campaign', 'Managed Campaign'], array_column($items, 'title_snapshot'));
 
         $device = (new DeviceModel())->find($fixture['device']->id);
@@ -68,6 +71,8 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertCount(1, $payload['schedules']);
         $this->assertSame('Jakarta Morning Playlist', $payload['schedules'][0]['title']);
         $this->assertSame($fixture['localKey'], $payload['schedules'][0]['playlist'][0]['mediaKey']);
+        $this->assertSame(10000, $payload['schedules'][0]['playlist'][0]['gapAfterMs']);
+        $this->assertSame(5000, $payload['schedules'][0]['playlist'][1]['gapAfterMs']);
         $this->assertArrayNotHasKey('assetId', $payload['schedules'][0]['playlist'][0]);
         $this->assertSame($fixture['assetPublicId'], $payload['schedules'][0]['playlist'][1]['assetId']);
         $this->assertStringEndsWith('+00:00', $payload['schedules'][0]['startTime']);
