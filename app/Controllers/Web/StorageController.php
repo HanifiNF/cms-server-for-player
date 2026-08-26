@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Libraries\StorageManager;
 use App\Libraries\StorageCredentialService;
 use App\Libraries\Storage\FtpsStorageDriver;
+use App\Libraries\Storage\SftpStorageDriver;
 use App\Models\StorageProfileModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
@@ -24,7 +25,7 @@ class StorageController extends BaseController
             try { $location = $manager->displayLocation($profile); }
             catch (Throwable $error) { $location = 'Unavailable: ' . $error->getMessage(); }
             $credentialUsername = '';
-            if ($profile->driver === 'ftps') {
+            if (in_array($profile->driver, ['ftps', 'sftp'], true)) {
                 try { $credentialUsername = (new StorageCredentialService())->decrypt($profile->credentials_encrypted ?? null)['username'] ?? ''; }
                 catch (Throwable) { $credentialUsername = ''; }
             }
@@ -46,7 +47,7 @@ class StorageController extends BaseController
         $driver = trim((string) $this->request->getPost('driver'));
         try {
             if ($name === '' || mb_strlen($name) > 120) throw new RuntimeException('Storage name is required and must not exceed 120 characters.');
-            if (! in_array($driver, ['local', 'ftps'], true)) throw new RuntimeException('That storage driver is not installed yet.');
+            if (! in_array($driver, ['local', 'ftps', 'sftp'], true)) throw new RuntimeException('That storage driver is not installed yet.');
             if ((new StorageProfileModel())->where('name', $name)->first() !== null) throw new RuntimeException('A storage profile already uses that name.');
             $publicId = $this->uuidV4();
             [$config, $credentials] = $this->profileConfiguration($driver, $publicId);
@@ -113,31 +114,33 @@ class StorageController extends BaseController
     {
         $model = new StorageProfileModel();
         $profile = $model->where('public_id', $publicId)->first();
-        if ($profile === null || $profile->driver !== 'ftps') return $this->backWithError('Only an FTPS profile can be configured here.');
+        if ($profile === null || ! in_array($profile->driver, ['ftps', 'sftp'], true)) return $this->backWithError('Only an FTPS or SFTP profile can be configured here.');
         try {
             $oldConfig = json_decode((string) $profile->config, true);
-            if (! is_array($oldConfig)) throw new RuntimeException('The existing FTPS configuration is invalid.');
+            if (! is_array($oldConfig)) throw new RuntimeException('The existing remote storage configuration is invalid.');
             $oldCredentials = (new StorageCredentialService())->decrypt($profile->credentials_encrypted ?? null);
-            [$config, $credentials] = $this->profileConfiguration('ftps', (string) $profile->public_id, $oldCredentials);
+            [$config, $credentials] = $this->profileConfiguration((string) $profile->driver, (string) $profile->public_id, $oldCredentials);
             $db = Database::connect();
             $references = $db->table('assets')->where('storage_profile_id', $profile->id)->countAllResults()
                 + $db->table('asset_versions')->where('storage_profile_id', $profile->id)->countAllResults();
-            foreach (['host', 'mode', 'port', 'remote_root'] as $field) {
+            $lockedFields = $profile->driver === 'ftps' ? ['host', 'mode', 'port', 'remote_root'] : ['host', 'port', 'remote_root'];
+            foreach ($lockedFields as $field) {
                 if ($references > 0 && (string) ($oldConfig[$field] ?? '') !== (string) ($config[$field] ?? '')) {
-                    throw new RuntimeException('Host, mode, port, and remote root cannot change while assets or revisions still reference this profile.');
+                    throw new RuntimeException('Connection endpoint fields cannot change while assets or revisions still reference this profile.');
                 }
             }
             $runtimeConfig = $config;
             $runtimeConfig['_profile_id'] = (string) $profile->public_id;
-            $test = (new FtpsStorageDriver($runtimeConfig, $credentials))->testConnection();
-            if (! $test['ok']) throw new RuntimeException('Updated FTPS settings were not saved because the connection test failed: ' . $test['message']);
+            $driver = $profile->driver === 'ftps' ? new FtpsStorageDriver($runtimeConfig, $credentials) : new SftpStorageDriver($runtimeConfig, $credentials);
+            $test = $driver->testConnection();
+            if (! $test['ok']) throw new RuntimeException('Updated remote storage settings were not saved because the connection test failed: ' . $test['message']);
             if (! $model->update($profile->id, [
                 'config' => json_encode($config, JSON_UNESCAPED_SLASHES),
                 'credentials_encrypted' => (new StorageCredentialService())->encrypt($credentials),
                 'last_tested_at' => gmdate('Y-m-d H:i:s'), 'last_test_status' => 'healthy',
                 'last_test_message' => $test['message'],
-            ])) throw new RuntimeException('The FTPS profile could not be updated.');
-            return redirect()->to('/control/storage')->with('success', 'FTPS configuration and encrypted credentials updated after a successful connection test.');
+            ])) throw new RuntimeException('The remote storage profile could not be updated.');
+            return redirect()->to('/control/storage')->with('success', strtoupper((string) $profile->driver) . ' configuration and encrypted credentials updated after a successful connection test.');
         } catch (Throwable $error) {
             return redirect()->to('/control/storage')->with('error', $error->getMessage());
         }
@@ -177,7 +180,27 @@ class StorageController extends BaseController
         }
         $cacheGb = trim((string) $this->request->getPost('cache_max_gb'));
         $cacheBytes = filter_var($cacheGb, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 1024]]);
-        if ($cacheBytes === false) throw new RuntimeException('FTPS cache capacity must be between 1 and 1024 GB.');
+        if ($cacheBytes === false) throw new RuntimeException(strtoupper($driver) . ' cache capacity must be between 1 and 1024 GB.');
+        if ($driver === 'sftp') {
+            $config = SftpStorageDriver::normalizeConfig([
+                '_profile_id' => $publicId,
+                'host' => $this->request->getPost('host'), 'port' => $this->request->getPost('port'),
+                'remote_root' => $this->request->getPost('remote_root'),
+                'host_key_fingerprint' => $this->request->getPost('host_key_fingerprint'),
+                'connect_timeout' => $this->request->getPost('connect_timeout'),
+                'transfer_timeout' => $this->request->getPost('transfer_timeout'),
+                'cache_ttl_seconds' => $this->request->getPost('cache_ttl_seconds'),
+                'cache_max_bytes' => (int) $cacheBytes * 1073741824,
+            ]);
+            unset($config['_profile_id']);
+            $submittedPassword = (string) $this->request->getPost('password');
+            $credentials = [
+                'username' => trim((string) $this->request->getPost('username')) ?: (string) ($existingCredentials['username'] ?? ''),
+                'password' => $submittedPassword !== '' ? $submittedPassword : (string) ($existingCredentials['password'] ?? ''),
+            ];
+            if ($credentials['username'] === '' || $credentials['password'] === '') throw new RuntimeException('SFTP username and password are required.');
+            return [$config, $credentials];
+        }
         $config = FtpsStorageDriver::normalizeConfig([
             '_profile_id' => $publicId,
             'host' => $this->request->getPost('host'),

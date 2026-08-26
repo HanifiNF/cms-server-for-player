@@ -4,6 +4,7 @@ namespace App\Libraries;
 
 use App\Libraries\Storage\LocalStorageDriver;
 use App\Libraries\Storage\FtpsStorageDriver;
+use App\Libraries\Storage\SftpStorageDriver;
 use App\Libraries\Storage\StorageDriverInterface;
 use App\Models\StorageProfileModel;
 use RuntimeException;
@@ -80,6 +81,7 @@ final class StorageManager
         return match ((string) $profile->driver) {
             'local' => new LocalStorageDriver($config),
             'ftps' => new FtpsStorageDriver($config, (new StorageCredentialService())->decrypt($profile->credentials_encrypted ?? null)),
+            'sftp' => new SftpStorageDriver($config, (new StorageCredentialService())->decrypt($profile->credentials_encrypted ?? null)),
             default => throw new RuntimeException('Storage driver "' . (string) $profile->driver . '" is not installed.'),
         };
     }

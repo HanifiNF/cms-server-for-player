@@ -628,4 +628,4 @@ CMS sudah memiliki:
 - endpoint download Player yang stabil;
 - dukungan HTTP Range dan resume pada alur download saat ini.
 
-CMS sekarang memiliki adapter FTPS konkret dengan Explicit/Implicit TLS, resumable `.part` transfer, atomic publish, encrypted credentials, connection probe, dan cache untuk Player HTTP Range. Adapter dapat dikonfigurasi setelah data endpoint perusahaan tersedia. Adapter S3, Azure Blob, dan Google Cloud Storage belum dibuat.
+CMS sekarang memiliki adapter SFTP konkret dengan mandatory SSH host-key pinning serta adapter FTPS Explicit/Implicit TLS. Keduanya mendukung resumable `.part` transfer, atomic publish, encrypted credentials, connection probe, dan cache untuk Player HTTP Range. Adapter S3, Azure Blob, dan Google Cloud Storage belum dibuat.

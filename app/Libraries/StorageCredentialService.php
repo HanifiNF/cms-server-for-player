@@ -57,12 +57,12 @@ final class StorageCredentialService
             if ($decoded === false || strlen($decoded) !== 32) throw new RuntimeException('storage.credentialsKey must be a Base64-encoded 32-byte key.');
             return $decoded;
         }
-        if (ENVIRONMENT === 'production') throw new RuntimeException('storage.credentialsKey must be configured before FTPS credentials can be used in production.');
+        if (ENVIRONMENT === 'production') throw new RuntimeException('storage.credentialsKey must be configured before remote storage credentials can be used in production.');
 
         // Development compatibility only: derive an isolated key from the LDG key.
         $ldgKey = trim((string) config(Ldg::class)->masterKey);
         $decoded = base64_decode($ldgKey, true);
-        if ($decoded === false || strlen($decoded) !== 32) throw new RuntimeException('Configure storage.credentialsKey before creating an FTPS profile.');
+        if ($decoded === false || strlen($decoded) !== 32) throw new RuntimeException('Configure storage.credentialsKey before creating a remote storage profile.');
         return hash_hkdf('sha256', $decoded, 32, self::PREFIX, 'development-fallback');
     }
 }

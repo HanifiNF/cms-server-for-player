@@ -206,7 +206,9 @@ final class WebControlPanelTest extends CIUnitTestCase
         $page->assertSee('Storage Profiles');
         $page->assertSee('Local Storage');
         $page->assertSee('Company FTPS');
-        $page->assertSee('FTPS adapter available');
+        $page->assertSee('Company SFTP');
+        $page->assertSee('SFTP and FTPS adapters available');
+        $page->assertSee('/sftpfiles/Testing(Hanif)');
 
         $root = 'storage/test-profile-' . bin2hex(random_bytes(4));
         try {
