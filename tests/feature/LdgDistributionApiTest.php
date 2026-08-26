@@ -28,15 +28,20 @@ final class LdgDistributionApiTest extends CIUnitTestCase
         $publicId = '72222222-2222-4333-8444-555555555555';
         $directory = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
         if (! is_dir($directory)) mkdir($directory, 0775, true);
+        $assetDirectoryName = 'Protected-Film--72222222';
+        $assetDirectory = $directory . DIRECTORY_SEPARATOR . $assetDirectoryName;
+        if (! is_dir($assetDirectory)) mkdir($assetDirectory, 0775, true);
         $source = WRITEPATH . 'ldg-api-source-' . bin2hex(random_bytes(5)) . '.mp4';
-        $destination = $directory . DIRECTORY_SEPARATOR . $publicId . '-r1.ldg';
+        $storedFilename = $publicId . '-r1.ldg';
+        $destination = $assetDirectory . DIRECTORY_SEPARATOR . $storedFilename;
         file_put_contents($source, random_bytes(1048576 + 41));
 
         try {
             $encrypted = (new LdgCryptoService())->encryptFile($source, $destination, $publicId, 1);
             $assetId = (new AssetModel())->insert([
                 'public_id' => $publicId, 'revision' => 1, 'title' => 'Protected Film',
-                'filename' => 'Protected Film.mp4', 'storage_key' => 'assets/' . basename($destination),
+                'filename' => 'Protected Film.mp4',
+                'storage_key' => 'assets/' . $assetDirectoryName . '/' . $storedFilename,
                 'mime_type' => 'video/mp4', ...$encrypted,
                 'duration_ms' => 90000, 'status' => 'active',
             ], true);
@@ -53,6 +58,7 @@ final class LdgDistributionApiTest extends CIUnitTestCase
             $manifest->assertOK();
             $data = json_decode($manifest->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data'][0];
             $this->assertSame('Protected-Film.ldg', $data['filename']);
+            $this->assertSame($assetDirectoryName . '/' . $storedFilename, $data['relative_path']);
             $this->assertSame('Protected Film.mp4', $data['display_filename']);
             $this->assertSame('application/vnd.wirgroup.ldg', $data['mime_type']);
             $this->assertSame('ldg-v1', $data['encryption']['format']);
@@ -87,6 +93,7 @@ final class LdgDistributionApiTest extends CIUnitTestCase
         } finally {
             if (is_file($source)) unlink($source);
             if (is_file($destination)) unlink($destination);
+            if (is_dir($assetDirectory)) rmdir($assetDirectory);
         }
     }
 }

@@ -10,6 +10,7 @@ use App\Models\DeviceModel;
 use App\Models\UserModel;
 use App\Models\LocationModel;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\AssetStoragePathService;
 use App\Libraries\AssetTaxonomyService;
 use App\Models\GenreModel;
 use App\Libraries\MediaMetadataService;
@@ -60,8 +61,7 @@ class AssetController extends BaseController
         if (isset($posterInfo['error'])) return $this->uploadFailure($posterInfo['error']);
 
         $publicId = $this->uuidV4();
-        $storedName = $publicId . '-r1.ldg';
-        $storageKey = 'assets/' . $storedName;
+        $storageKey = (new AssetStoragePathService())->newMediaKey($metadata['title'], $publicId, 1);
         $storage = new StorageManager();
         $profile = null;
         $encryptedTemporaryPath = null;
@@ -238,8 +238,7 @@ class AssetController extends BaseController
                 $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
                 if (! in_array($extension, self::EXTENSIONS, true)) throw new RuntimeException('The replacement file type is not supported.');
                 if (mb_strlen($filename) > 255) throw new RuntimeException('The replacement filename is too long.');
-                $storedName = $asset->public_id . '-r' . $revision . '.ldg';
-                $newStoredKey = 'assets/' . $storedName;
+                $newStoredKey = (new AssetStoragePathService())->revisionMediaKey($asset, $revision);
                 $newTemporaryPath = $storage->temporaryPath('.ldg');
                 $sourcePath = $file->getTempName();
                 if ($sourcePath === '' || ! is_file($sourcePath)) throw new RuntimeException('Replacement media temporary file was not found.');

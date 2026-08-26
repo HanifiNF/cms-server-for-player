@@ -5,6 +5,7 @@ namespace App\Controllers\Api\Player;
 use App\Controllers\BaseController;
 use App\Libraries\AssetInventoryService;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\AssetStoragePathService;
 use App\Libraries\LdgCryptoService;
 use App\Libraries\StorageManager;
 use App\Libraries\DeviceEnrollmentService;
@@ -92,6 +93,7 @@ class AssetController extends BaseController
         $assets = [];
         $assetModel = new AssetModel();
         $ldg = new LdgCryptoService();
+        $paths = new AssetStoragePathService();
         $playerToken = $this->bearerToken();
         foreach ($assignments as $assignment) {
             if ($assignment->status === 'removal_pending') continue;
@@ -125,6 +127,7 @@ class AssetController extends BaseController
                 'id' => $asset->public_id,
                 'title' => $asset->title,
                 'filename' => $encrypted ? $ldg->downloadFilename($asset) : $asset->filename,
+                'relative_path' => $paths->playerRelativePath($asset),
                 'display_filename' => $asset->filename,
                 'download_url' => '/api/player/assets/' . rawurlencode($asset->public_id) . '/download',
                 'size' => (int) $asset->size_bytes,
@@ -148,6 +151,7 @@ class AssetController extends BaseController
         (new AssetExpiryService())->expireDue();
         $items = [];
         $assetModel = new AssetModel();
+        $paths = new AssetStoragePathService();
         foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'removal_pending')->findAll() as $assignment) {
             if ($assignment->asset_id === null) continue;
             $asset = $assetModel->find($assignment->asset_id);
@@ -156,6 +160,7 @@ class AssetController extends BaseController
             $items[] = [
                 'id' => $asset->public_id,
                 'filename' => $encrypted ? (new LdgCryptoService())->downloadFilename($asset) : $asset->filename,
+                'relative_path' => $paths->playerRelativePath($asset),
                 'encryption_format' => $encrypted ? LdgCryptoService::FORMAT : null,
             ];
         }
