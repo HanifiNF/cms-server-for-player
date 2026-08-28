@@ -55,6 +55,17 @@ final class LocalStorageDriver implements StorageDriverInterface
         if (is_file($path) && ! @unlink($path)) throw new RuntimeException('The storage object could not be deleted.');
     }
 
+    public function deleteEmptyDirectory(string $key): bool
+    {
+        $path = $this->path($key);
+        if (! is_dir($path)) return false;
+        $items = scandir($path);
+        if ($items === false) throw new RuntimeException('The storage directory could not be inspected.');
+        if (array_values(array_diff($items, ['.', '..'])) !== []) return false;
+        if (! @rmdir($path)) throw new RuntimeException('The empty storage directory could not be deleted.');
+        return true;
+    }
+
     public function testConnection(): array
     {
         try {

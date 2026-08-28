@@ -8,6 +8,7 @@ interface StorageDriverInterface
     public function materialize(string $key): ?string;
     public function exists(string $key): bool;
     public function delete(string $key): void;
+    public function deleteEmptyDirectory(string $key): bool;
     /** @return array{ok:bool,message:string} */
     public function testConnection(): array;
     public function displayLocation(): string;

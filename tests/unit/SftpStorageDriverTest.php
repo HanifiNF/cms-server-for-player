@@ -16,15 +16,20 @@ final class SftpStorageDriverTest extends CIUnitTestCase
         $this->assertNotFalse($source);
         file_put_contents($source, 'encrypted-media');
         try {
-            $driver->putFile($source, 'assets/film.ldg');
-            $this->assertSame('encrypted-media', $transport->objects['/sftpfiles/Testing(Hanif)/assets/film.ldg']);
-            $this->assertTrue($driver->exists('assets/film.ldg'));
-            $materialized = $driver->materialize('assets/film.ldg');
+            $driver->putFile($source, 'assets/Test--93266dbf/film.ldg');
+            $this->assertSame('encrypted-media', $transport->objects['/sftpfiles/Testing(Hanif)/assets/Test--93266dbf/film.ldg']);
+            $this->assertTrue($driver->exists('assets/Test--93266dbf/film.ldg'));
+            $materialized = $driver->materialize('assets/Test--93266dbf/film.ldg');
             $this->assertNotNull($materialized);
             $this->assertSame('encrypted-media', file_get_contents($materialized));
-            $driver->delete('assets/film.ldg');
-            $this->assertFalse($driver->exists('assets/film.ldg'));
+            $driver->delete('assets/Test--93266dbf/film.ldg');
+            $this->assertFalse($driver->exists('assets/Test--93266dbf/film.ldg'));
             $this->assertFileDoesNotExist($materialized);
+            $transport->objects['/sftpfiles/Testing(Hanif)/assets/Test--93266dbf/keep.txt'] = 'preserve';
+            $this->assertFalse($driver->deleteEmptyDirectory('assets/Test--93266dbf'));
+            unset($transport->objects['/sftpfiles/Testing(Hanif)/assets/Test--93266dbf/keep.txt']);
+            $this->assertTrue($driver->deleteEmptyDirectory('assets/Test--93266dbf'));
+            $this->assertSame(['/sftpfiles/Testing(Hanif)/assets/Test--93266dbf'], $transport->deletedDirectories);
             $this->assertSame('sftp://103.165.225.221:22/sftpfiles/Testing(Hanif)', $driver->displayLocation());
         } finally {
             @unlink($source);
@@ -86,6 +91,8 @@ final class MemorySftpTransport implements FtpsTransportInterface
 {
     /** @var array<string, string> */
     public array $objects = [];
+    /** @var list<string> */
+    public array $deletedDirectories = [];
     public function size(string $remotePath): ?int { return isset($this->objects[$remotePath]) ? strlen($this->objects[$remotePath]) : null; }
     public function upload(string $sourcePath, string $remotePath, int $offset): void
     {
@@ -100,4 +107,11 @@ final class MemorySftpTransport implements FtpsTransportInterface
     }
     public function rename(string $fromPath, string $toPath): void { $this->objects[$toPath] = $this->objects[$fromPath]; unset($this->objects[$fromPath]); }
     public function delete(string $remotePath): void { unset($this->objects[$remotePath]); }
+    public function deleteEmptyDirectory(string $remotePath): bool
+    {
+        $prefix = rtrim($remotePath, '/') . '/';
+        foreach (array_keys($this->objects) as $object) if (str_starts_with($object, $prefix)) return false;
+        $this->deletedDirectories[] = $remotePath;
+        return true;
+    }
 }

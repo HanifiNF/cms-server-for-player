@@ -69,6 +69,17 @@ final class PhpseclibSftpTransport implements FtpsTransportInterface
         }
     }
 
+    public function deleteEmptyDirectory(string $remotePath): bool
+    {
+        if (! $this->sftp->is_dir($remotePath)) return false;
+        $items = $this->sftp->nlist($remotePath);
+        if (! is_array($items)) throw new RuntimeException('SFTP directory inspection failed: ' . $this->lastError());
+        $items = array_values(array_filter($items, static fn (string $item): bool => ! in_array(basename(rtrim($item, '/')), ['.', '..'], true)));
+        if ($items !== []) return false;
+        if (! $this->sftp->rmdir($remotePath)) throw new RuntimeException('SFTP empty directory delete failed: ' . $this->lastError());
+        return true;
+    }
+
     private function lastError(): string
     {
         $errors = $this->sftp->getSFTPErrors();

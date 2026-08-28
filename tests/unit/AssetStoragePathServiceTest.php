@@ -71,4 +71,14 @@ final class AssetStoragePathServiceTest extends CIUnitTestCase
         $this->assertSame('Film Title--12345678/original-r1.ldg', $service->playerRelativePath($nested));
         $this->assertSame('12345678-1234-4234-8234-1234567890ab.ldg', $service->playerRelativePath($legacy));
     }
+
+    public function testAssetDirectoryKeyReturnsOnlyARealChildDirectory(): void
+    {
+        $service = new AssetStoragePathService();
+        $this->assertSame(
+            'assets/Film Title--12345678',
+            $service->assetDirectoryKey('assets/Film Title--12345678/original-r1.ldg'),
+        );
+        $this->assertNull($service->assetDirectoryKey('assets/12345678-r1.ldg'));
+    }
 }

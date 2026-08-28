@@ -45,6 +45,15 @@ final class AssetStoragePathService
         return $this->safeSegment((string) ($asset->public_id ?? ''), 'asset', 64) . '.' . $extension;
     }
 
+    public function assetDirectoryKey(string $storageKey): ?string
+    {
+        $relative = $this->relativeStoragePath($storageKey);
+        if (! str_contains($relative, '/')) return null;
+        $directory = str_replace('\\', '/', dirname($relative));
+        if ($directory === '' || $directory === '.') return null;
+        return self::ASSET_PREFIX . $this->assertPortableRelativePath($directory);
+    }
+
     public function assertPortableRelativePath(string $path): string
     {
         $path = str_replace('\\', '/', trim($path));

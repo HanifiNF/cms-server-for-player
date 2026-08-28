@@ -662,12 +662,18 @@ class AssetController extends BaseController
         }
 
         $storage = new StorageManager();
+        $pathService = new AssetStoragePathService();
         $objects = [];
+        $assetDirectories = [];
         $assetProfile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
         $objects[(int) $assetProfile->id . ':' . (string) $asset->storage_key] = [$assetProfile, (string) $asset->storage_key];
+        $assetDirectory = $pathService->assetDirectoryKey((string) $asset->storage_key);
+        if ($assetDirectory !== null) $assetDirectories[(int) $assetProfile->id . ':' . $assetDirectory] = [$assetProfile, $assetDirectory];
         foreach ((new AssetVersionModel())->where('asset_id', $asset->id)->findAll() as $version) {
             $profile = $storage->profile($version->storage_profile_id === null ? null : (int) $version->storage_profile_id);
             $objects[(int) $profile->id . ':' . (string) $version->storage_key] = [$profile, (string) $version->storage_key];
+            $assetDirectory = $pathService->assetDirectoryKey((string) $version->storage_key);
+            if ($assetDirectory !== null) $assetDirectories[(int) $profile->id . ':' . $assetDirectory] = [$profile, $assetDirectory];
         }
         if ((string) $asset->poster_storage_key !== '') {
             $objects[(int) $assetProfile->id . ':' . (string) $asset->poster_storage_key] = [$assetProfile, (string) $asset->poster_storage_key];
@@ -710,6 +716,14 @@ class AssetController extends BaseController
             } catch (Throwable $error) {
                 $cleanupFailed = true;
                 log_message('error', 'Deleted asset storage cleanup failed: {message}', ['message' => $error->getMessage()]);
+            }
+        }
+        foreach ($assetDirectories as [$profile, $directoryKey]) {
+            try {
+                $storage->deleteEmptyDirectory($profile, $directoryKey);
+            } catch (Throwable $error) {
+                $cleanupFailed = true;
+                log_message('error', 'Deleted asset directory cleanup failed: {message}', ['message' => $error->getMessage()]);
             }
         }
         foreach ($stagedFiles as $stagedFile) {

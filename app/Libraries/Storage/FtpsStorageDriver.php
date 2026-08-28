@@ -153,6 +153,11 @@ final class FtpsStorageDriver implements StorageDriverInterface
         }
     }
 
+    public function deleteEmptyDirectory(string $key): bool
+    {
+        return $this->transport->deleteEmptyDirectory($this->remotePath($key));
+    }
+
     public function testConnection(): array
     {
         $staging = WRITEPATH . 'storage-staging';

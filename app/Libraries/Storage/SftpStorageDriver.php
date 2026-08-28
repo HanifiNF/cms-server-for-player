@@ -71,6 +71,7 @@ final class SftpStorageDriver implements StorageDriverInterface
     public function materialize(string $key): ?string { return $this->delegate->materialize($key); }
     public function exists(string $key): bool { return $this->delegate->exists($key); }
     public function delete(string $key): void { $this->delegate->delete($key); }
+    public function deleteEmptyDirectory(string $key): bool { return $this->delegate->deleteEmptyDirectory($key); }
 
     public function testConnection(): array
     {

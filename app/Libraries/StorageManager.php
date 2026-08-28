@@ -46,6 +46,15 @@ final class StorageManager
         if ($key !== '') $this->driver($profile)->delete($key);
     }
 
+    public function deleteEmptyDirectory(object $profile, string $key): bool
+    {
+        $key = trim(str_replace('\\', '/', $key), '/');
+        if ($key === '' || ! str_contains($key, '/')) {
+            throw new RuntimeException('Storage root directories cannot be deleted.');
+        }
+        return $this->driver($profile)->deleteEmptyDirectory($key);
+    }
+
     /** @return array{ok:bool,message:string} */
     public function test(object $profile): array
     {

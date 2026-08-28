@@ -136,19 +136,22 @@ final class WebControlPanelTest extends CIUnitTestCase
         $storageDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . 'assets';
         if (! is_dir($storageDir)) mkdir($storageDir, 0775, true);
         $deletePublicId = 'eeeeeeee-2222-4333-8444-555555555555';
-        $deletePath = $storageDir . DIRECTORY_SEPARATOR . $deletePublicId . '-r1.mp4';
-        $deletePathTwo = $storageDir . DIRECTORY_SEPARATOR . $deletePublicId . '-r2.mp4';
+        $deleteFolderName = 'Disposable-Film--eeeeeeee';
+        $deleteDirectory = $storageDir . DIRECTORY_SEPARATOR . $deleteFolderName;
+        if (! is_dir($deleteDirectory)) mkdir($deleteDirectory, 0775, true);
+        $deletePath = $deleteDirectory . DIRECTORY_SEPARATOR . $deletePublicId . '-r1.mp4';
+        $deletePathTwo = $deleteDirectory . DIRECTORY_SEPARATOR . $deletePublicId . '-r2.mp4';
         file_put_contents($deletePath, 'revision one');
         file_put_contents($deletePathTwo, 'revision two');
         $deleteAssetId = (new AssetModel())->insert([
             'public_id' => $deletePublicId, 'revision' => 2, 'title' => 'Disposable Film', 'filename' => 'Disposable Film v2.mp4',
-            'storage_key' => 'assets/' . $deletePublicId . '-r2.mp4', 'mime_type' => 'video/mp4',
+            'storage_key' => 'assets/' . $deleteFolderName . '/' . $deletePublicId . '-r2.mp4', 'mime_type' => 'video/mp4',
             'size_bytes' => 12, 'sha256' => hash('sha256', 'revision two'), 'duration_ms' => 1000,
             'status' => 'active', 'created_by' => $adminId,
         ], true);
         (new AssetVersionModel())->insertBatch([
-            ['asset_id' => $deleteAssetId, 'revision' => 1, 'filename' => 'Disposable Film.mp4', 'storage_key' => 'assets/' . $deletePublicId . '-r1.mp4', 'mime_type' => 'video/mp4', 'size_bytes' => 12, 'sha256' => hash('sha256', 'revision one'), 'duration_ms' => 1000, 'status' => 'rejected', 'submitted_by' => $adminId],
-            ['asset_id' => $deleteAssetId, 'revision' => 2, 'filename' => 'Disposable Film v2.mp4', 'storage_key' => 'assets/' . $deletePublicId . '-r2.mp4', 'mime_type' => 'video/mp4', 'size_bytes' => 12, 'sha256' => hash('sha256', 'revision two'), 'duration_ms' => 1000, 'status' => 'approved', 'submitted_by' => $adminId],
+            ['asset_id' => $deleteAssetId, 'revision' => 1, 'filename' => 'Disposable Film.mp4', 'storage_key' => 'assets/' . $deleteFolderName . '/' . $deletePublicId . '-r1.mp4', 'mime_type' => 'video/mp4', 'size_bytes' => 12, 'sha256' => hash('sha256', 'revision one'), 'duration_ms' => 1000, 'status' => 'rejected', 'submitted_by' => $adminId],
+            ['asset_id' => $deleteAssetId, 'revision' => 2, 'filename' => 'Disposable Film v2.mp4', 'storage_key' => 'assets/' . $deleteFolderName . '/' . $deletePublicId . '-r2.mp4', 'mime_type' => 'video/mp4', 'size_bytes' => 12, 'sha256' => hash('sha256', 'revision two'), 'duration_ms' => 1000, 'status' => 'approved', 'submitted_by' => $adminId],
         ]);
         try {
             $deletedAsset = $this->withSession(['cms_web_user_id' => $adminId])
@@ -157,9 +160,11 @@ final class WebControlPanelTest extends CIUnitTestCase
             $this->assertNull((new AssetModel())->find($deleteAssetId));
             $this->assertFileDoesNotExist($deletePath);
             $this->assertFileDoesNotExist($deletePathTwo);
+            $this->assertDirectoryDoesNotExist($deleteDirectory);
         } finally {
             if (is_file($deletePath)) unlink($deletePath);
             if (is_file($deletePathTwo)) unlink($deletePathTwo);
+            if (is_dir($deleteDirectory)) rmdir($deleteDirectory);
         }
 
         (new DeviceAssetModel())->insert([

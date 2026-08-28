@@ -9,4 +9,5 @@ interface FtpsTransportInterface
     public function download(string $remotePath, string $destinationPath, int $offset): void;
     public function rename(string $fromPath, string $toPath): void;
     public function delete(string $remotePath): void;
+    public function deleteEmptyDirectory(string $remotePath): bool;
 }

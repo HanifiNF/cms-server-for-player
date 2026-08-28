@@ -13,7 +13,7 @@ final class FtpsStorageDriverTest extends CIUnitTestCase
     {
         $namespace = 'ftps-test-' . bin2hex(random_bytes(5));
         $transport = new MemoryFtpsTransport();
-        $transport->objects['/company/assets/film.ldg.part'] = 'encr';
+        $transport->objects['/company/assets/Film--12345678/film.ldg.part'] = 'encr';
         $driver = new FtpsStorageDriver([
             '_profile_id' => $namespace,
             'host' => 'ftps.company.example', 'mode' => 'explicit', 'port' => 21,
@@ -26,24 +26,26 @@ final class FtpsStorageDriverTest extends CIUnitTestCase
         $this->assertNotFalse($source);
         file_put_contents($source, 'encrypted-media');
         try {
-            $driver->putFile($source, 'assets/film.ldg');
-            $this->assertSame('encrypted-media', $transport->objects['/company/assets/film.ldg']);
-            $this->assertArrayNotHasKey('/company/assets/film.ldg.part', $transport->objects);
+            $driver->putFile($source, 'assets/Film--12345678/film.ldg');
+            $this->assertSame('encrypted-media', $transport->objects['/company/assets/Film--12345678/film.ldg']);
+            $this->assertArrayNotHasKey('/company/assets/Film--12345678/film.ldg.part', $transport->objects);
             $this->assertSame([4], $transport->uploadOffsets);
-            $this->assertTrue($driver->exists('assets/film.ldg'));
+            $this->assertTrue($driver->exists('assets/Film--12345678/film.ldg'));
 
-            $seeded = $driver->materialize('assets/film.ldg');
+            $seeded = $driver->materialize('assets/Film--12345678/film.ldg');
             $this->assertNotNull($seeded);
             $this->assertSame('encrypted-media', file_get_contents($seeded));
             unlink($seeded);
-            $downloaded = $driver->materialize('assets/film.ldg');
+            $downloaded = $driver->materialize('assets/Film--12345678/film.ldg');
             $this->assertNotNull($downloaded);
             $this->assertSame('encrypted-media', file_get_contents($downloaded));
             $this->assertSame([0], $transport->downloadOffsets);
 
-            $driver->delete('assets/film.ldg');
-            $this->assertFalse($driver->exists('assets/film.ldg'));
+            $driver->delete('assets/Film--12345678/film.ldg');
+            $this->assertFalse($driver->exists('assets/Film--12345678/film.ldg'));
             $this->assertFileDoesNotExist($downloaded);
+            $this->assertTrue($driver->deleteEmptyDirectory('assets/Film--12345678'));
+            $this->assertSame(['/company/assets/Film--12345678'], $transport->deletedDirectories);
         } finally {
             @unlink($source);
             $this->removeCacheDirectory($namespace);
@@ -100,6 +102,8 @@ final class MemoryFtpsTransport implements FtpsTransportInterface
     public array $uploadOffsets = [];
     /** @var list<int> */
     public array $downloadOffsets = [];
+    /** @var list<string> */
+    public array $deletedDirectories = [];
 
     public function size(string $remotePath): ?int { return array_key_exists($remotePath, $this->objects) ? strlen($this->objects[$remotePath]) : null; }
 
@@ -126,4 +130,12 @@ final class MemoryFtpsTransport implements FtpsTransportInterface
     }
 
     public function delete(string $remotePath): void { unset($this->objects[$remotePath]); }
+
+    public function deleteEmptyDirectory(string $remotePath): bool
+    {
+        $prefix = rtrim($remotePath, '/') . '/';
+        foreach (array_keys($this->objects) as $object) if (str_starts_with($object, $prefix)) return false;
+        $this->deletedDirectories[] = $remotePath;
+        return true;
+    }
 }

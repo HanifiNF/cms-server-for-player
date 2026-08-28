@@ -86,6 +86,26 @@ final class CurlFtpsTransport implements FtpsTransportInterface
         $this->quote(['DELE ' . $remotePath], 'FTPS delete failed');
     }
 
+    public function deleteEmptyDirectory(string $remotePath): bool
+    {
+        $directory = rtrim($remotePath, '/') . '/';
+        $handle = $this->handle($directory, [CURLOPT_DIRLISTONLY => true, CURLOPT_RETURNTRANSFER => true]);
+        try {
+            $listing = curl_exec($handle);
+            if ($listing === false) {
+                if (curl_errno($handle) === CURLE_REMOTE_FILE_NOT_FOUND) return false;
+                throw new RuntimeException('FTPS directory inspection failed: ' . curl_error($handle));
+            }
+        } finally {
+            curl_close($handle);
+        }
+        $items = preg_split('/\r\n|\r|\n/', trim((string) $listing)) ?: [];
+        $items = array_values(array_filter($items, static fn (string $item): bool => $item !== '' && ! in_array(basename(rtrim($item, '/')), ['.', '..'], true)));
+        if ($items !== []) return false;
+        $this->quote(['RMD ' . rtrim($remotePath, '/')], 'FTPS empty directory delete failed');
+        return true;
+    }
+
     /** @param list<string> $commands */
     private function quote(array $commands, string $context): void
     {
