@@ -20,11 +20,13 @@ class ScheduleService
 {
     private BaseConnection $db;
     private ScheduleRecurrence $recurrence;
+    private ScheduleTimeline $timeline;
 
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
         $this->recurrence = new ScheduleRecurrence();
+        $this->timeline = new ScheduleTimeline();
     }
 
     /** @return list<array<string, mixed>> */
@@ -99,7 +101,12 @@ class ScheduleService
             $row['device_location'] = $first['location'] ?? null;
             $row['target_count'] = count($row['targets']);
             $row['location_count'] = count(array_unique(array_column($row['targets'], 'location')));
-            $row['items'] = $this->itemsForSchedule((int) $row['id']);
+            $timeline = $this->timeline->calculate(
+                $this->itemsForSchedule((int) $row['id']),
+                (bool) $row['loop_enabled'],
+            );
+            $row['items'] = $timeline['items'];
+            $row['timeline'] = $timeline;
             $row['display_status'] = $this->displayStatus($row);
         }
         unset($row);
@@ -116,7 +123,12 @@ class ScheduleService
         $row['device_public_id'] = $first['public_id'] ?? null;
         $row['device_name'] = $first['name'] ?? 'No target';
         $row['device_location'] = $first['location'] ?? null;
-        $row['items'] = $this->itemsForSchedule((int) $row['id']);
+        $timeline = $this->timeline->calculate(
+            $this->itemsForSchedule((int) $row['id']),
+            (bool) $row['loop_enabled'],
+        );
+        $row['items'] = $timeline['items'];
+        $row['timeline'] = $timeline;
         return $row;
     }
 
@@ -274,9 +286,8 @@ class ScheduleService
         }
 
         $startInput = trim((string) ($input['start_at'] ?? ''));
-        $start = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $startInput, $timezone);
-        $dateErrors = DateTimeImmutable::getLastErrors();
-        if ($start === false || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+        $start = $this->parseLocalStart($startInput, $timezone);
+        if ($start === null) {
             $errors['start_at'] = 'Choose a valid start date and time.';
         }
 
@@ -308,6 +319,7 @@ class ScheduleService
         $keys = is_array($input['media_keys'] ?? null) ? array_values($input['media_keys']) : [];
         $durations = is_array($input['duration_ms'] ?? null) ? array_values($input['duration_ms']) : [];
         $gaps = is_array($input['gap_after_ms'] ?? null) ? array_values($input['gap_after_ms']) : [];
+        $loopEnabled = isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1';
         if ($keys === []) $errors['playlist'] = 'Add at least one Ready media item.';
         if (count($keys) > 100) $errors['playlist'] = 'A playlist may contain at most 100 items.';
 
@@ -322,7 +334,6 @@ class ScheduleService
         $ready ??= [];
         $items = [];
         $expirationDates = [];
-        $totalDurationMs = 0;
         foreach ($keys as $index => $value) {
             $key = trim((string) $value);
             $asset = $ready[$key] ?? null;
@@ -355,8 +366,6 @@ class ScheduleService
                 $errors["gap.{$index}"] = 'Each film gap must be between 0 milliseconds and 24 hours.';
                 continue;
             }
-            $effectiveGapMs = ($index < count($keys) - 1 || (isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1')) ? $gapAfterMs : 0;
-            $totalDurationMs += $duration + $effectiveGapMs;
             $items[] = [
                 'position' => $index,
                 'asset_id' => $asset->asset_id !== null ? (int) $asset->asset_id : null,
@@ -366,6 +375,8 @@ class ScheduleService
                 'gap_after_ms' => $gapAfterMs,
             ];
         }
+        $timeline = $this->timeline->calculate($items, $loopEnabled);
+        $totalDurationMs = $timeline['total_duration_ms'];
         if ($totalDurationMs <= 0) $errors['playlist_duration'] = 'The playlist must have a valid total duration.';
         if ($totalDurationMs > 86400000) $errors['playlist_duration'] = 'A recurring playlist may not exceed 24 hours in total.';
 
@@ -431,7 +442,7 @@ class ScheduleService
             'start_at' => $startUtc->format('Y-m-d H:i:s.u'), 'end_at' => $endUtc->format('Y-m-d H:i:s.u'),
             'recurrence' => $recurrenceType, 'recurrence_config' => $recurrenceConfig,
             'priority' => max(-100, min(100, (int) ($input['priority'] ?? 0))),
-            'loop_enabled' => isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1',
+            'loop_enabled' => $loopEnabled,
             'items' => $items,
         ];
     }
@@ -598,6 +609,18 @@ class ScheduleService
         try { $timezone = new DateTimeZone((string) ($schedule['timezone'] ?: 'Asia/Jakarta')); }
         catch (Throwable) { $timezone = new DateTimeZone('Asia/Jakarta'); }
         return $utc->setTimezone($timezone)->format(DATE_ATOM);
+    }
+
+    private function parseLocalStart(string $value, DateTimeZone $timezone): ?DateTimeImmutable
+    {
+        foreach (['!Y-m-d\TH:i:s', '!Y-m-d\TH:i'] as $format) {
+            $candidate = DateTimeImmutable::createFromFormat($format, $value, $timezone);
+            $dateErrors = DateTimeImmutable::getLastErrors();
+            if ($candidate !== false && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0))) {
+                return $candidate;
+            }
+        }
+        return null;
     }
 
     private function uuidV4(): string

@@ -23,7 +23,9 @@ final class ScheduleFlowTest extends CIUnitTestCase
     public function testAdminCreatesOrderedScheduleAndPlayerReceivesAuthenticatedSnapshot(): void
     {
         $fixture = $this->fixture();
-        $start = (new \DateTimeImmutable('+15 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i');
+        $startAt = new \DateTimeImmutable('+15 minutes', new \DateTimeZone('Asia/Jakarta'));
+        $startAt = $startAt->setTime((int) $startAt->format('H'), (int) $startAt->format('i'), 37);
+        $start = $startAt->format('Y-m-d\TH:i:s');
 
         $page = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules');
         $page->assertOK();
@@ -51,6 +53,14 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame([45000, 90000], array_map('intval', array_column($items, 'duration_override_ms')));
         $this->assertSame([10000, 5000], array_map('intval', array_column($items, 'gap_after_ms')));
         $this->assertSame(['Local Campaign', 'Managed Campaign'], array_column($items, 'title_snapshot'));
+        $this->assertSame(37, (int) $schedule->start_at->format('s'));
+
+        $webSchedule = (new ScheduleService())->listForWeb()[0];
+        $this->assertSame(135000, $webSchedule['timeline']['film_duration_ms']);
+        $this->assertSame(10000, $webSchedule['timeline']['gap_duration_ms']);
+        $this->assertSame(145000, $webSchedule['timeline']['total_duration_ms']);
+        $this->assertSame(55000, $webSchedule['items'][1]['start_offset_ms']);
+        $this->assertSame(145000, $webSchedule['items'][1]['content_end_offset_ms']);
 
         $device = (new DeviceModel())->find($fixture['device']->id);
         $this->assertSame(1, (int) $device->schedule_revision);

@@ -23,7 +23,7 @@ class ScheduleController extends BaseController
         if ($editing !== null) {
             $timezone = new DateTimeZone((string) $editing['timezone']);
             $editing['start_local'] = (new DateTimeImmutable((string) $editing['start_at'], new DateTimeZone('UTC')))
-                ->setTimezone($timezone)->format('Y-m-d\TH:i');
+                ->setTimezone($timezone)->format('Y-m-d\TH:i:s');
             $config = is_array($editing['recurrence_config'])
                 ? $editing['recurrence_config']
                 : json_decode((string) ($editing['recurrence_config'] ?? ''), true);

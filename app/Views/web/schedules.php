@@ -1,12 +1,4 @@
 <?= view('web/_layout_top', get_defined_vars()) ?>
-<style>
-.playlist-row{grid-template-columns:30px minmax(150px,1fr) minmax(220px,.9fr) minmax(220px,.9fr) auto}
-.timeline-duration{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;min-width:0;margin:0;padding:8px;border:1px solid var(--line);border-radius:9px}
-.timeline-duration legend{padding:0 4px;color:var(--muted);font-size:11px;font-weight:800}.timeline-duration label{font-size:10px}.timeline-duration input{min-width:0;padding:8px}.film-gap{background:var(--surface-2)}
-.film-gap.inactive{opacity:.55}.film-gap.inactive legend::after{content:' (no next film)';font-weight:500}
-@media(max-width:1250px){.playlist-row{grid-template-columns:30px minmax(160px,1fr) minmax(220px,1fr)}.film-gap{grid-column:3}.playlist-controls{grid-column:2/4;justify-content:flex-end}}
-@media(max-width:700px){.playlist-row{grid-template-columns:1fr}.film-gap,.playlist-controls{grid-column:auto}.timeline-duration{width:100%}}
-</style>
 <?php
 $editingItems = $editing['items'] ?? [];
 $formDevice = (string) old('device_id', $editing['device_public_id'] ?? '');
@@ -24,6 +16,10 @@ $formAutoExpiry = old('auto_expiry_until');
 if ($formAutoExpiry === null) $formAutoExpiry = $editing ? '0' : '1';
 $formDays = old('days_of_week', $editing['recurrence_values']['daysOfWeek'] ?? []);
 $formDays = is_array($formDays) ? array_map('intval', $formDays) : [];
+$formatDuration = static function (int $milliseconds): string {
+    $seconds = max(0, intdiv($milliseconds, 1000));
+    return sprintf('%02d:%02d:%02d', intdiv($seconds, 3600), intdiv($seconds % 3600, 60), $seconds % 60);
+};
 $oldKeys = old('media_keys');
 $oldDurations = old('duration_ms');
 $oldGaps = old('gap_after_ms');
@@ -55,7 +51,7 @@ foreach ($devices as $device) {
       <label>Schedule title<input name="title" value="<?= esc($formTitle) ?>" maxlength="255" placeholder="Morning playlist" required></label>
       <div class="schedule-target-field"><span class="schedule-field-label">Target Studios</span><details class="schedule-target-picker" id="scheduleTargetPicker"><summary><span id="scheduleTargetSummary">Choose one or more Studios</span><b aria-hidden="true">⌄</b></summary><div class="schedule-target-panel"><label class="schedule-target-search">Search Location or Studio<input type="search" id="scheduleTargetSearch" placeholder="Search Location or Studio…"></label><div class="schedule-target-groups"><?php foreach ($deviceGroups as $locationKey => $group): ?><details class="schedule-target-location" data-target-location data-search-text="<?= esc(mb_strtolower($group['name'] . ' ' . implode(' ', array_column($group['devices'], 'name'))), 'attr') ?>"><summary><label><input type="checkbox" data-target-location-check><span><strong><?= esc($group['name']) ?></strong><small><?= count($group['devices']) ?> Studio(s)<?= $group['code'] ? ' · ' . esc($group['code']) : '' ?></small></span></label><b aria-hidden="true">⌄</b></summary><div><?php foreach ($group['devices'] as $device): ?><label class="schedule-target-option" data-target-option data-search-text="<?= esc(mb_strtolower($group['name'] . ' ' . $device['name']), 'attr') ?>"><input type="checkbox" name="device_ids[]" value="<?= esc($device['id'], 'attr') ?>" data-target-device <?= in_array((string) $device['id'], $formDevices, true) ? 'checked' : '' ?>><span><strong><?= esc($device['name']) ?></strong><small><?= count($device['media']) ?> Ready media · <?= esc($device['timezone']) ?></small></span></label><?php endforeach ?></div></details><?php endforeach ?><div class="empty schedule-target-empty" id="scheduleTargetEmpty" hidden>No Location or Studio matches this search.</div></div></div></details></div>
       <label>Schedule timezone<select id="scheduleTimezone" name="timezone" required><?php foreach ($availableTimezones as $timezone): ?><option value="<?= esc($timezone, 'attr') ?>" <?= $formTimezone === $timezone ? 'selected' : '' ?>><?= esc($timezone) ?></option><?php endforeach ?></select></label>
-      <label>Start time<input type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" required></label>
+      <label>Start time<input id="scheduleStartTime" type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" step="1" required></label>
       <label>Priority<input type="number" name="priority" value="<?= esc($formPriority) ?>" min="-100" max="100"></label>
     </div>
     <div class="recurrence-panel" id="scheduleRecurrencePanel" data-mode="<?= esc($formRecurrence, 'attr') ?>">
@@ -68,6 +64,14 @@ foreach ($devices as $device) {
       <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on every selected Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
       <div class="media-picker-filters"><input id="mediaSearch" type="search" placeholder="Search media title"><select id="mediaTypeFilter"><option value="">All types</option><option value="featured">Featured</option><option value="ads">Ads</option><option value="trailer">Trailer</option><option value="local">Local media</option></select><select id="mediaGenreFilter"><option value="">All genres</option></select></div>
       <div class="playlist-picker"><select id="mediaPicker"><option value="">Select Ready media</option></select><button id="addMedia" type="button" class="btn ghost">Add to playlist</button></div>
+      <div class="playlist-timeline-summary" aria-live="polite">
+        <span><small>SCHEDULE START</small><strong id="timelineScheduleStart">—</strong></span>
+        <span><small>SCHEDULE END</small><strong id="timelineScheduleEnd">—</strong></span>
+        <span><small>FILM DURATION</small><strong id="timelineFilmDuration">00:00:00</strong></span>
+        <span><small>TOTAL GAP</small><strong id="timelineGapDuration">00:00:00</strong></span>
+        <span><small>TOTAL DURATION</small><strong id="timelineTotalDuration">00:00:00</strong></span>
+        <span><small>TIMEZONE</small><strong id="timelineTimezone"><?= esc($formTimezone) ?></strong></span>
+      </div>
       <div id="playlistRows" class="playlist-rows"></div>
       <div id="playlistEmpty" class="empty">Choose one or more Studios, then add media available on all of them.</div>
     </div>
@@ -96,8 +100,20 @@ foreach ($devices as $device) {
     <article class="card schedule-card">
       <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div>
       <?php if ((int) $schedule['target_count'] > 1): ?><details class="schedule-card-targets"><summary>View <?= (int) $schedule['target_count'] ?> target Studios <span>⌄</span></summary><div><?php foreach ($schedule['targets'] as $target): ?><span><strong><?= esc($target['name']) ?></strong><small><?= esc($target['location'] ?: 'No Location') ?></small></span><?php endforeach ?></div></details><?php endif ?>
-      <div class="schedule-meta"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i')) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span><span><small>PLAYLIST</small><?= count($schedule['items']) ?> items</span></div>
-      <ol class="schedule-items"><?php foreach ($schedule['items'] as $item): ?><li><span><?= esc($item['title_snapshot']) ?></span><small><?= gmdate('H:i:s', intdiv((int) $item['duration_override_ms'], 1000)) ?><?= (int) ($item['gap_after_ms'] ?? 0) > 0 ? ' · gap ' . gmdate('H:i:s', intdiv((int) $item['gap_after_ms'], 1000)) : '' ?></small></li><?php endforeach ?></ol>
+      <div class="schedule-meta schedule-meta-detailed"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i:s')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i:s')) ?></span><span><small>FILM DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['film_duration_ms'])) ?></span><span><small>TOTAL GAP</small><?= esc($formatDuration((int) $schedule['timeline']['gap_duration_ms'])) ?></span><span><small>TOTAL DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['total_duration_ms'])) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span></div>
+      <ol class="schedule-items schedule-timeline-items">
+        <?php foreach ($schedule['items'] as $item):
+          $itemStart = $start->modify('+' . (int) $item['start_offset_ms'] . ' milliseconds');
+          $contentEnd = $start->modify('+' . (int) $item['content_end_offset_ms'] . ' milliseconds');
+          $nextStart = $start->modify('+' . (int) $item['next_start_offset_ms'] . ' milliseconds');
+          $effectiveGap = (int) $item['effective_gap_after_ms'];
+        ?>
+          <li>
+            <div class="schedule-item-title"><span><?= esc($item['title_snapshot']) ?></span><small>Duration <?= esc($formatDuration((int) $item['duration_override_ms'])) ?><?= $effectiveGap > 0 ? ' · Gap ' . esc($formatDuration($effectiveGap)) : '' ?></small></div>
+            <div class="schedule-item-times"><span><small>STARTS AT</small><?= esc($itemStart->format('Y-m-d H:i:s')) ?></span><span><small>CONTENT ENDS</small><?= esc($contentEnd->format('Y-m-d H:i:s')) ?></span><span><small><?= $effectiveGap > 0 ? 'NEXT START' : 'TIMELINE END' ?></small><?= esc(($effectiveGap > 0 ? $nextStart : $contentEnd)->format('Y-m-d H:i:s')) ?></span></div>
+          </li>
+        <?php endforeach ?>
+      </ol>
       <div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div>
     </article>
     <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
@@ -122,6 +138,8 @@ foreach ($devices as $device) {
   const mediaSearch = document.getElementById('mediaSearch');
   const mediaTypeFilter = document.getElementById('mediaTypeFilter');
   const mediaGenreFilter = document.getElementById('mediaGenreFilter');
+  const startInput = document.getElementById('scheduleStartTime');
+  const timezoneInput = document.getElementById('scheduleTimezone');
   let playlist = [];
   const duration = ms => { const s = Math.max(0, Math.round(Number(ms) / 1000)); return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(v => String(v).padStart(2, '0')).join(':'); };
   function selectedDevices() { return targetChecks.filter(check => check.checked).map(check => byId.get(String(check.value))).filter(Boolean); }
@@ -204,8 +222,8 @@ foreach ($devices as $device) {
     const available = mediaMap(); rows.innerHTML = '';
     playlist = playlist.filter(item => available.has(item.mediaKey));
     playlist.forEach((entry, index) => {
-      const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row';
-      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up">↑</button><button type="button" class="btn ghost" data-action="down">↓</button><button type="button" class="btn danger" data-action="remove">×</button></span><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
+      const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row'; row.dataset.timelineIndex = String(index);
+      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span><small>STARTS AT</small><strong data-timeline-start>—</strong></span><span><small>CONTENT ENDS</small><strong data-timeline-end>—</strong></span><span><small data-timeline-next-label>NEXT START</small><strong data-timeline-next>—</strong></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
       row.querySelector('strong').textContent = media.title; row.querySelector('small').textContent = media.filename;
       const durationHidden = row.querySelector('input[name="duration_ms[]"]');
       const gapHidden = row.querySelector('input[name="gap_after_ms[]"]');
@@ -222,7 +240,50 @@ foreach ($devices as $device) {
     });
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
   }
-  function updateTotal() { const available = mediaMap(); const loop = document.querySelector('input[name=loop_enabled]')?.checked; const total = playlist.reduce((sum, item, index) => sum + Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0) + ((index < playlist.length - 1 || loop) ? Number(item.gapAfterMs || 0) : 0), 0); document.getElementById('playlistTotal').textContent = duration(total); }
+  function scheduleStartEpoch() {
+    const match = String(startInput.value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) return null;
+    const desired = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6] || 0));
+    let guess = desired;
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezoneInput.value, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const parts = Object.fromEntries(formatter.formatToParts(new Date(guess)).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+        const observed = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+        guess += desired - observed;
+      }
+      return guess;
+    } catch (_) { return desired; }
+  }
+  function formatMoment(epoch) {
+    if (!Number.isFinite(epoch)) return '—';
+    try { return new Intl.DateTimeFormat('en-GB', { timeZone: timezoneInput.value, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(epoch)).replace(',', ' ·'); }
+    catch (_) { return new Date(epoch).toISOString().replace('T', ' ').slice(0, 19); }
+  }
+  function updateTotal() {
+    const available = mediaMap(); const loop = document.querySelector('input[name=loop_enabled]')?.checked;
+    const startEpoch = scheduleStartEpoch(); let cursor = 0; let filmTotal = 0; let gapTotal = 0;
+    playlist.forEach((item, index) => {
+      const filmDuration = Math.max(0, Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0));
+      const gap = (index < playlist.length - 1 || loop) ? Math.max(0, Number(item.gapAfterMs || 0)) : 0;
+      const itemStart = cursor; const contentEnd = itemStart + filmDuration; const nextStart = contentEnd + gap;
+      const row = rows.querySelector(`[data-timeline-index="${index}"]`);
+      if (row) {
+        row.querySelector('[data-timeline-start]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + itemStart);
+        row.querySelector('[data-timeline-end]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + contentEnd);
+        row.querySelector('[data-timeline-next-label]').textContent = index === playlist.length - 1 ? (loop ? 'NEXT CYCLE' : 'SCHEDULE ENDS') : 'NEXT START';
+        row.querySelector('[data-timeline-next]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + nextStart);
+      }
+      filmTotal += filmDuration; gapTotal += gap; cursor = nextStart;
+    });
+    document.getElementById('playlistTotal').textContent = duration(cursor);
+    document.getElementById('timelineFilmDuration').textContent = duration(filmTotal);
+    document.getElementById('timelineGapDuration').textContent = duration(gapTotal);
+    document.getElementById('timelineTotalDuration').textContent = duration(cursor);
+    document.getElementById('timelineScheduleStart').textContent = startEpoch === null ? '—' : formatMoment(startEpoch);
+    document.getElementById('timelineScheduleEnd').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + cursor);
+    document.getElementById('timelineTimezone').textContent = timezoneInput.value || '—';
+  }
   function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }
   for (const check of targetChecks) check.addEventListener('change', targetsChanged);
   for (const group of locationGroups) {
@@ -244,6 +305,7 @@ foreach ($devices as $device) {
   });
   document.addEventListener('click', event => { if (targetPicker.open && !targetPicker.contains(event.target)) targetPicker.open = false; });
   mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
+  startInput.addEventListener('input', updateTotal); timezoneInput.addEventListener('change', updateTotal);
   recurrence.addEventListener('change', updateRecurrenceFields);
   autoExpiryUntil.addEventListener('change', syncExpiryEndDate);
   document.querySelector('input[name=loop_enabled]')?.addEventListener('change', render);
