@@ -2,8 +2,24 @@
 
 namespace App\Libraries;
 
+use InvalidArgumentException;
+
 final class ScheduleTimeline
 {
+    public const MAX_GAP_MS = 86_400_000;
+
+    public function gapFromBoundary(int $contentEndMs, int $requestedBoundaryMs): int
+    {
+        $gapMs = $requestedBoundaryMs - $contentEndMs;
+        if ($gapMs < 0) {
+            throw new InvalidArgumentException('A timeline boundary cannot be earlier than the film content end.');
+        }
+        if ($gapMs > self::MAX_GAP_MS) {
+            throw new InvalidArgumentException('A film gap may not exceed 24 hours.');
+        }
+        return $gapMs;
+    }
+
     /**
      * @param list<array<string, mixed>> $items
      * @return array{
@@ -24,9 +40,11 @@ final class ScheduleTimeline
         foreach (array_values($items) as $index => $item) {
             $durationMs = max(0, (int) ($item['duration_override_ms'] ?? $item['durationMs'] ?? 0));
             $configuredGapMs = max(0, (int) ($item['gap_after_ms'] ?? $item['gapAfterMs'] ?? 0));
-            $effectiveGapMs = ($index < $lastIndex || $loop) ? $configuredGapMs : 0;
             $startOffsetMs = $cursorMs;
             $contentEndOffsetMs = $startOffsetMs + $durationMs;
+            $effectiveGapMs = ($index < $lastIndex || $loop)
+                ? $this->gapFromBoundary($contentEndOffsetMs, $contentEndOffsetMs + $configuredGapMs)
+                : 0;
             $nextStartOffsetMs = $contentEndOffsetMs + $effectiveGapMs;
 
             $timelineItems[] = [

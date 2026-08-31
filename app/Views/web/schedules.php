@@ -223,7 +223,7 @@ foreach ($devices as $device) {
     playlist = playlist.filter(item => available.has(item.mediaKey));
     playlist.forEach((entry, index) => {
       const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row'; row.dataset.timelineIndex = String(index);
-      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span><small>STARTS AT</small><strong data-timeline-start>—</strong></span><span><small>CONTENT ENDS</small><strong data-timeline-end>—</strong></span><span><small data-timeline-next-label>NEXT START</small><strong data-timeline-next>—</strong></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
+      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span class="timeline-clock" data-start-clock><small>STARTS AT</small><strong data-timeline-start>—</strong><input data-timeline-start-input type="datetime-local" step="1" hidden><em data-start-note></em><b class="timeline-clock-error" data-start-error></b></span><span class="timeline-clock"><small>CONTENT ENDS</small><strong data-timeline-end>—</strong><em>Calculated from film duration</em></span><span class="timeline-clock" data-boundary-clock><small data-timeline-next-label>TIMELINE ENDS</small><strong data-timeline-next>—</strong><div class="timeline-boundary-controls"><input data-timeline-boundary-input type="datetime-local" step="1" hidden><button data-action="reset-gap" class="btn ghost" type="button" hidden>Reset</button></div><em data-timeline-status></em><b class="timeline-clock-error" data-boundary-error></b></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
       row.querySelector('strong').textContent = media.title; row.querySelector('small').textContent = media.filename;
       const durationHidden = row.querySelector('input[name="duration_ms[]"]');
       const gapHidden = row.querySelector('input[name="gap_after_ms[]"]');
@@ -234,14 +234,35 @@ foreach ($devices as $device) {
       const gapActive = index < playlist.length - 1 || document.querySelector('input[name=loop_enabled]')?.checked;
       row.querySelector('.film-gap').classList.toggle('inactive', !gapActive);
       row.querySelectorAll('.film-gap input').forEach(input => { input.disabled = !gapActive; });
+      const manualStart = row.querySelector('[data-timeline-start-input]');
+      const boundaryInput = row.querySelector('[data-timeline-boundary-input]');
+      const resetGap = row.querySelector('[data-action=reset-gap]');
+      if (index > 0) {
+        row.querySelector('[data-timeline-start]').hidden = true;
+        manualStart.hidden = false;
+        row.querySelector('[data-start-note]').textContent = 'Adjusts the previous film gap';
+        manualStart.addEventListener('change', () => applyBoundary(index - 1, manualStart, row.querySelector('[data-start-error]')));
+      } else {
+        row.querySelector('[data-start-note]').textContent = 'Locked to schedule start';
+      }
+      if (gapActive) {
+        row.querySelector('[data-timeline-next]').hidden = true;
+        boundaryInput.hidden = false;
+        resetGap.hidden = false;
+        boundaryInput.addEventListener('change', () => applyBoundary(index, boundaryInput, row.querySelector('[data-boundary-error]')));
+        resetGap.onclick = () => { entry.gapAfterMs = 0; render(); };
+      }
+      for (const input of [manualStart, boundaryInput]) input.addEventListener('input', () => {
+        input.classList.remove('invalid');
+      });
       row.querySelector('[data-action=up]').onclick = () => { if (index > 0) [playlist[index - 1], playlist[index]] = [playlist[index], playlist[index - 1]]; render(); };
       row.querySelector('[data-action=down]').onclick = () => { if (index < playlist.length - 1) [playlist[index + 1], playlist[index]] = [playlist[index], playlist[index + 1]]; render(); };
       row.querySelector('[data-action=remove]').onclick = () => { playlist.splice(index, 1); render(); }; rows.appendChild(row);
     });
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
   }
-  function scheduleStartEpoch() {
-    const match = String(startInput.value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  function zonedEpoch(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
     if (!match) return null;
     const desired = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6] || 0));
     let guess = desired;
@@ -255,33 +276,82 @@ foreach ($devices as $device) {
       return guess;
     } catch (_) { return desired; }
   }
+  function scheduleStartEpoch() { return zonedEpoch(startInput.value); }
   function formatMoment(epoch) {
     if (!Number.isFinite(epoch)) return '—';
     try { return new Intl.DateTimeFormat('en-GB', { timeZone: timezoneInput.value, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(epoch)).replace(',', ' ·'); }
     catch (_) { return new Date(epoch).toISOString().replace('T', ' ').slice(0, 19); }
   }
-  function updateTotal() {
+  function formatMomentInput(epoch) {
+    if (!Number.isFinite(epoch)) return '';
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezoneInput.value, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(epoch)).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+    } catch (_) { return new Date(epoch).toISOString().slice(0, 19); }
+  }
+  function timelineSnapshot() {
     const available = mediaMap(); const loop = document.querySelector('input[name=loop_enabled]')?.checked;
-    const startEpoch = scheduleStartEpoch(); let cursor = 0; let filmTotal = 0; let gapTotal = 0;
+    const items = []; let cursor = 0; let filmTotal = 0; let gapTotal = 0;
     playlist.forEach((item, index) => {
       const filmDuration = Math.max(0, Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0));
       const gap = (index < playlist.length - 1 || loop) ? Math.max(0, Number(item.gapAfterMs || 0)) : 0;
-      const itemStart = cursor; const contentEnd = itemStart + filmDuration; const nextStart = contentEnd + gap;
-      const row = rows.querySelector(`[data-timeline-index="${index}"]`);
-      if (row) {
-        row.querySelector('[data-timeline-start]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + itemStart);
-        row.querySelector('[data-timeline-end]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + contentEnd);
-        row.querySelector('[data-timeline-next-label]').textContent = index === playlist.length - 1 ? (loop ? 'NEXT CYCLE' : 'SCHEDULE ENDS') : 'NEXT START';
-        row.querySelector('[data-timeline-next]').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + nextStart);
-      }
+      const contentEnd = cursor + filmDuration; const nextStart = contentEnd + gap;
+      items.push({ start: cursor, contentEnd, nextStart, filmDuration, gap });
       filmTotal += filmDuration; gapTotal += gap; cursor = nextStart;
     });
-    document.getElementById('playlistTotal').textContent = duration(cursor);
-    document.getElementById('timelineFilmDuration').textContent = duration(filmTotal);
-    document.getElementById('timelineGapDuration').textContent = duration(gapTotal);
-    document.getElementById('timelineTotalDuration').textContent = duration(cursor);
+    return { items, filmTotal, gapTotal, total: cursor, loop };
+  }
+  function applyBoundary(previousIndex, control, errorTarget) {
+    control.setCustomValidity(''); control.classList.remove('invalid'); errorTarget.textContent = '';
+    const scheduleStart = scheduleStartEpoch(); const requestedBoundary = zonedEpoch(control.value);
+    const timeline = timelineSnapshot(); const previous = timeline.items[previousIndex];
+    let message = '';
+    if (scheduleStart === null) message = 'Choose the schedule start time first.';
+    else if (requestedBoundary === null || !previous) message = 'Choose a valid boundary date and time.';
+    else {
+      const gap = Math.round(requestedBoundary - (scheduleStart + previous.contentEnd));
+      if (gap < 0) message = `This film cannot end before its content finishes at ${formatMoment(scheduleStart + previous.contentEnd)}.`;
+      else if (gap > 86400000) message = 'A film gap may not exceed 24 hours.';
+      else {
+        playlist[previousIndex].gapAfterMs = gap;
+        const previousRow = rows.querySelector(`[data-timeline-index="${previousIndex}"]`);
+        if (previousRow) previousRow.querySelector('input[name="gap_after_ms[]"]').value = String(gap);
+        updateTotal();
+        return;
+      }
+    }
+    control.setCustomValidity(message); control.classList.add('invalid'); errorTarget.textContent = message; control.reportValidity();
+  }
+  function updateTotal() {
+    const startEpoch = scheduleStartEpoch(); const timeline = timelineSnapshot();
+    timeline.items.forEach((item, index) => {
+      const row = rows.querySelector(`[data-timeline-index="${index}"]`);
+      if (row) {
+        const startValue = startEpoch === null ? null : startEpoch + item.start;
+        const contentEndValue = startEpoch === null ? null : startEpoch + item.contentEnd;
+        const boundaryValue = startEpoch === null ? null : startEpoch + item.nextStart;
+        row.querySelector('[data-timeline-start]').textContent = startValue === null ? '—' : formatMoment(startValue);
+        row.querySelector('[data-timeline-end]').textContent = contentEndValue === null ? '—' : formatMoment(contentEndValue);
+        row.querySelector('[data-timeline-next-label]').textContent = index === playlist.length - 1 ? (timeline.loop ? 'NEXT CYCLE STARTS' : 'SCHEDULE ENDS') : 'TIMELINE ENDS';
+        row.querySelector('[data-timeline-next]').textContent = boundaryValue === null ? '—' : formatMoment(boundaryValue);
+        const manualStart = row.querySelector('[data-timeline-start-input]');
+        const boundaryInput = row.querySelector('[data-timeline-boundary-input]');
+        if (!manualStart.hidden) { manualStart.value = startValue === null ? '' : formatMomentInput(startValue); manualStart.disabled = startValue === null; }
+        if (!boundaryInput.hidden) { boundaryInput.value = boundaryValue === null ? '' : formatMomentInput(boundaryValue); boundaryInput.disabled = boundaryValue === null; }
+        const status = row.querySelector('[data-timeline-status]');
+        status.textContent = item.gap > 0 ? `Adjusted · ${duration(item.gap)} gap` : (index === playlist.length - 1 && !timeline.loop ? 'Ends with the film' : 'Automatic · no gap');
+        status.classList.toggle('adjusted', item.gap > 0);
+        const reset = row.querySelector('[data-action=reset-gap]');
+        if (reset) reset.hidden = item.gap <= 0;
+      }
+    });
+    document.getElementById('playlistTotal').textContent = duration(timeline.total);
+    document.getElementById('timelineFilmDuration').textContent = duration(timeline.filmTotal);
+    document.getElementById('timelineGapDuration').textContent = duration(timeline.gapTotal);
+    document.getElementById('timelineTotalDuration').textContent = duration(timeline.total);
     document.getElementById('timelineScheduleStart').textContent = startEpoch === null ? '—' : formatMoment(startEpoch);
-    document.getElementById('timelineScheduleEnd').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + cursor);
+    document.getElementById('timelineScheduleEnd').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + timeline.total);
     document.getElementById('timelineTimezone').textContent = timezoneInput.value || '—';
   }
   function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }

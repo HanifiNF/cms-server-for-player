@@ -16,6 +16,14 @@
 .film-gap.inactive{opacity:.55}.film-gap.inactive legend::after{content:' (not included)';font-weight:500}
 .playlist-item-timeline{grid-column:2/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding-top:10px;border-top:1px solid var(--line)}
 .playlist-item-timeline>span{min-width:0;padding:8px 10px;border-radius:8px;background:var(--surface-2)}
+.timeline-clock>em{display:block;min-height:15px;margin-top:5px;color:var(--muted);font-size:10px;font-style:normal;line-height:1.35}
+.timeline-clock>em.adjusted{color:var(--red);font-weight:800}
+.timeline-clock input[type=datetime-local]{width:100%;min-width:0;height:38px;box-sizing:border-box;padding:7px 9px;background:var(--surface)}
+.timeline-clock input.invalid{border-color:var(--red);box-shadow:0 0 0 2px rgba(205,58,61,.1)}
+.timeline-boundary-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px}
+.timeline-boundary-controls .btn{height:38px;padding:7px 10px}
+.timeline-clock-error{display:block;margin-top:5px;color:var(--red);font-size:10px;font-weight:700;line-height:1.35}
+.timeline-clock-error:empty{display:none}
 .schedule-meta.schedule-meta-detailed{grid-template-columns:repeat(3,minmax(0,1fr))}
 .schedule-timeline-items{display:grid;gap:8px}
 .schedule-timeline-items li{display:grid;grid-template-columns:minmax(170px,.75fr) minmax(0,1.6fr);align-items:center;gap:14px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}

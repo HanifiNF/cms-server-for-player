@@ -107,6 +107,32 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame(3, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
     }
 
+    public function testAdjustedTimelineBoundaryPersistsAsTheExistingFilmGap(): void
+    {
+        $fixture = $this->fixture();
+        $start = (new \DateTimeImmutable('+20 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i:s');
+
+        $this->postForm('/control/schedules', [
+            'title' => 'Twenty Minute Boundary', 'device_id' => $fixture['device']->public_id,
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start,
+            'media_keys' => [$fixture['localKey'], $fixture['managedKey']],
+            'duration_ms' => [60_000, 90_000],
+            'gap_after_ms' => [1_200_000, 0],
+        ], $fixture['adminId'])->assertRedirectTo('/control/schedules');
+
+        $schedule = (new ScheduleModel())->where('title', 'Twenty Minute Boundary')->first();
+        $this->assertNotNull($schedule);
+        $this->assertSame(1_350, $schedule->end_at->getTimestamp() - $schedule->start_at->getTimestamp());
+
+        $items = Database::connect()->table('schedule_items')->where('schedule_id', $schedule->id)->orderBy('position')->get()->getResultArray();
+        $this->assertSame(1_200_000, (int) $items[0]['gap_after_ms']);
+
+        $snapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules');
+        $playlist = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['schedules'][0]['playlist'];
+        $this->assertSame(1_200_000, $playlist[0]['gapAfterMs']);
+        $this->assertArrayNotHasKey('startTime', $playlist[1], 'No per-film start-time variable should be introduced.');
+    }
+
     public function testDailyScheduleSurvivesItsFirstOccurrenceAndBlocksFutureConflict(): void
     {
         $fixture = $this->fixture();

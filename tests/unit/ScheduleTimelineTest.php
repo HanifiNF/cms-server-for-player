@@ -47,4 +47,19 @@ final class ScheduleTimelineTest extends CIUnitTestCase
             'gap_duration_ms' => 0, 'total_duration_ms' => 0,
         ], (new ScheduleTimeline())->calculate([]));
     }
+
+    public function testManualBoundaryIsConvertedToTheExistingFilmGap(): void
+    {
+        $timeline = new ScheduleTimeline();
+
+        $this->assertSame(1_200_000, $timeline->gapFromBoundary(3_600_000, 4_800_000));
+        $this->expectException(\InvalidArgumentException::class);
+        $timeline->gapFromBoundary(3_600_000, 3_599_999);
+    }
+
+    public function testManualBoundaryRejectsAGapLongerThanOneDay(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new ScheduleTimeline())->gapFromBoundary(0, ScheduleTimeline::MAX_GAP_MS + 1);
+    }
 }
