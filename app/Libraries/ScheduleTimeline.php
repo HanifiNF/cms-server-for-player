@@ -38,7 +38,9 @@ final class ScheduleTimeline
         $timelineItems = [];
 
         foreach (array_values($items) as $index => $item) {
-            $durationMs = max(0, (int) ($item['duration_override_ms'] ?? $item['durationMs'] ?? 0));
+            $sourceDurationMs = max(0, (int) ($item['duration_override_ms'] ?? $item['sourceDurationMs'] ?? $item['durationMs'] ?? 0));
+            $playbackStartOffsetMs = max(0, (int) ($item['playback_start_offset_ms'] ?? $item['startOffsetMs'] ?? 0));
+            $durationMs = max(0, $sourceDurationMs - $playbackStartOffsetMs);
             $configuredGapMs = max(0, (int) ($item['gap_after_ms'] ?? $item['gapAfterMs'] ?? 0));
             $startOffsetMs = $cursorMs;
             $contentEndOffsetMs = $startOffsetMs + $durationMs;
@@ -49,6 +51,8 @@ final class ScheduleTimeline
 
             $timelineItems[] = [
                 ...$item,
+                'playback_start_offset_ms' => $playbackStartOffsetMs,
+                'effective_duration_ms' => $durationMs,
                 'start_offset_ms' => $startOffsetMs,
                 'content_end_offset_ms' => $contentEndOffsetMs,
                 'effective_gap_after_ms' => $effectiveGapMs,

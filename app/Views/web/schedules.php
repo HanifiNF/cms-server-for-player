@@ -22,12 +22,13 @@ $formatDuration = static function (int $milliseconds): string {
 };
 $oldKeys = old('media_keys');
 $oldDurations = old('duration_ms');
+$oldPlaybackStartOffsets = old('playback_start_offset_ms');
 $oldGaps = old('gap_after_ms');
 $initialItems = [];
 if (is_array($oldKeys)) {
-    foreach (array_values($oldKeys) as $index => $key) $initialItems[] = ['mediaKey' => $key, 'durationMs' => (int) ($oldDurations[$index] ?? 0), 'gapAfterMs' => (int) ($oldGaps[$index] ?? 0)];
+    foreach (array_values($oldKeys) as $index => $key) $initialItems[] = ['mediaKey' => $key, 'durationMs' => (int) ($oldDurations[$index] ?? 0), 'startOffsetMs' => (int) ($oldPlaybackStartOffsets[$index] ?? 0), 'gapAfterMs' => (int) ($oldGaps[$index] ?? 0)];
 } else {
-    foreach ($editingItems as $item) $initialItems[] = ['mediaKey' => $item['media_key'], 'durationMs' => (int) $item['duration_override_ms'], 'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0)];
+    foreach ($editingItems as $item) $initialItems[] = ['mediaKey' => $item['media_key'], 'durationMs' => (int) $item['duration_override_ms'], 'startOffsetMs' => (int) ($item['playback_start_offset_ms'] ?? 0), 'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0)];
 }
 $deviceGroups = [];
 $availableTimezones = ['Asia/Jakarta' => 'Asia/Jakarta'];
@@ -109,7 +110,7 @@ foreach ($devices as $device) {
           $effectiveGap = (int) $item['effective_gap_after_ms'];
         ?>
           <li>
-            <div class="schedule-item-title"><span><?= esc($item['title_snapshot']) ?></span><small>Duration <?= esc($formatDuration((int) $item['duration_override_ms'])) ?><?= $effectiveGap > 0 ? ' · Gap ' . esc($formatDuration($effectiveGap)) : '' ?></small></div>
+            <div class="schedule-item-title"><span><?= esc($item['title_snapshot']) ?></span><small>Source <?= esc($formatDuration((int) $item['duration_override_ms'])) ?><?= (int) $item['playback_start_offset_ms'] > 0 ? ' · Starts from ' . esc($formatDuration((int) $item['playback_start_offset_ms'])) : '' ?> · Plays <?= esc($formatDuration((int) $item['effective_duration_ms'])) ?><?= $effectiveGap > 0 ? ' · Gap ' . esc($formatDuration($effectiveGap)) : '' ?></small></div>
             <div class="schedule-item-times"><span><small>STARTS AT</small><?= esc($itemStart->format('Y-m-d H:i:s')) ?></span><span><small>CONTENT ENDS</small><?= esc($contentEnd->format('Y-m-d H:i:s')) ?></span><span><small><?= $effectiveGap > 0 ? 'NEXT START' : 'TIMELINE END' ?></small><?= esc(($effectiveGap > 0 ? $nextStart : $contentEnd)->format('Y-m-d H:i:s')) ?></span></div>
           </li>
         <?php endforeach ?>
@@ -223,13 +224,15 @@ foreach ($devices as $device) {
     playlist = playlist.filter(item => available.has(item.mediaKey));
     playlist.forEach((entry, index) => {
       const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row'; row.dataset.timelineIndex = String(index);
-      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span class="timeline-clock" data-start-clock><small>STARTS AT</small><strong data-timeline-start>—</strong><input data-timeline-start-input type="datetime-local" step="1" hidden><em data-start-note></em><b class="timeline-clock-error" data-start-error></b></span><span class="timeline-clock"><small>CONTENT ENDS</small><strong data-timeline-end>—</strong><em>Calculated from film duration</em></span><span class="timeline-clock" data-boundary-clock><small data-timeline-next-label>TIMELINE ENDS</small><strong data-timeline-next>—</strong><div class="timeline-boundary-controls"><input data-timeline-boundary-input type="datetime-local" step="1" hidden><button data-action="reset-gap" class="btn ghost" type="button" hidden>Reset</button></div><em data-timeline-status></em><b class="timeline-clock-error" data-boundary-error></b></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="gap_after_ms[]">`;
+      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong></strong><small></small></span><fieldset class="timeline-duration" data-time="duration"><legend>Film duration</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><fieldset class="timeline-duration film-start" data-time="start-offset"><legend>Start film at</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label><b class="timeline-clock-error" data-offset-error></b></fieldset><fieldset class="timeline-duration film-gap" data-time="gap"><legend>Gap after film</legend><label>Hours<input data-unit="hours" type="number" min="0" max="24"></label><label>Minutes<input data-unit="minutes" type="number" min="0" max="59"></label><label>Seconds<input data-unit="seconds" type="number" min="0" max="59"></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="reset-offset" aria-label="Reset film start position" title="Play from the beginning">↤</button><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span class="timeline-clock" data-start-clock><small>STARTS AT</small><strong data-timeline-start>—</strong><input data-timeline-start-input type="datetime-local" step="1" hidden><em data-start-note></em><b class="timeline-clock-error" data-start-error></b></span><span class="timeline-clock"><small>CONTENT ENDS</small><strong data-timeline-end>—</strong><em data-played-duration>Calculated from played duration</em></span><span class="timeline-clock" data-boundary-clock><small data-timeline-next-label>TIMELINE ENDS</small><strong data-timeline-next>—</strong><div class="timeline-boundary-controls"><input data-timeline-boundary-input type="datetime-local" step="1" hidden><button data-action="reset-gap" class="btn ghost" type="button" hidden>Reset</button></div><em data-timeline-status></em><b class="timeline-clock-error" data-boundary-error></b></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="playback_start_offset_ms[]"><input type="hidden" name="gap_after_ms[]">`;
       row.querySelector('strong').textContent = media.title; row.querySelector('small').textContent = media.filename;
       const durationHidden = row.querySelector('input[name="duration_ms[]"]');
+      const playbackStartOffsetHidden = row.querySelector('input[name="playback_start_offset_ms[]"]');
       const gapHidden = row.querySelector('input[name="gap_after_ms[]"]');
       row.querySelector('input[name="media_keys[]"]').value = entry.mediaKey;
       const bindTime = (selector, initialMs, onChange) => { const box = row.querySelector(selector); const totalSeconds = Math.max(0, Math.round(Number(initialMs || 0) / 1000)); box.querySelector('[data-unit=hours]').value = Math.floor(totalSeconds / 3600); box.querySelector('[data-unit=minutes]').value = Math.floor(totalSeconds % 3600 / 60); box.querySelector('[data-unit=seconds]').value = totalSeconds % 60; const sync = () => { const h = Math.max(0, Number(box.querySelector('[data-unit=hours]').value) || 0); const m = Math.max(0, Math.min(59, Number(box.querySelector('[data-unit=minutes]').value) || 0)); const s = Math.max(0, Math.min(59, Number(box.querySelector('[data-unit=seconds]').value) || 0)); onChange((h * 3600 + m * 60 + s) * 1000); }; box.querySelectorAll('input').forEach(input => input.addEventListener('input', sync)); sync(); };
       bindTime('[data-time=duration]', entry.durationMs || media.durationMs, value => { entry.durationMs = value; durationHidden.value = value; updateTotal(); });
+      bindTime('[data-time=start-offset]', entry.startOffsetMs || 0, value => { entry.startOffsetMs = value; playbackStartOffsetHidden.value = value; updateTotal(); });
       bindTime('[data-time=gap]', entry.gapAfterMs || 0, value => { entry.gapAfterMs = value; gapHidden.value = value; updateTotal(); });
       const gapActive = index < playlist.length - 1 || document.querySelector('input[name=loop_enabled]')?.checked;
       row.querySelector('.film-gap').classList.toggle('inactive', !gapActive);
@@ -257,6 +260,7 @@ foreach ($devices as $device) {
       });
       row.querySelector('[data-action=up]').onclick = () => { if (index > 0) [playlist[index - 1], playlist[index]] = [playlist[index], playlist[index - 1]]; render(); };
       row.querySelector('[data-action=down]').onclick = () => { if (index < playlist.length - 1) [playlist[index + 1], playlist[index]] = [playlist[index], playlist[index + 1]]; render(); };
+      row.querySelector('[data-action=reset-offset]').onclick = () => { entry.startOffsetMs = 0; render(); };
       row.querySelector('[data-action=remove]').onclick = () => { playlist.splice(index, 1); render(); }; rows.appendChild(row);
     });
     document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
@@ -294,10 +298,12 @@ foreach ($devices as $device) {
     const available = mediaMap(); const loop = document.querySelector('input[name=loop_enabled]')?.checked;
     const items = []; let cursor = 0; let filmTotal = 0; let gapTotal = 0;
     playlist.forEach((item, index) => {
-      const filmDuration = Math.max(0, Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0));
+      const sourceDuration = Math.max(0, Number(item.durationMs || available.get(item.mediaKey)?.durationMs || 0));
+      const startOffset = Math.max(0, Number(item.startOffsetMs || 0));
+      const filmDuration = Math.max(0, sourceDuration - startOffset);
       const gap = (index < playlist.length - 1 || loop) ? Math.max(0, Number(item.gapAfterMs || 0)) : 0;
       const contentEnd = cursor + filmDuration; const nextStart = contentEnd + gap;
-      items.push({ start: cursor, contentEnd, nextStart, filmDuration, gap });
+      items.push({ start: cursor, contentEnd, nextStart, sourceDuration, startOffset, filmDuration, gap });
       filmTotal += filmDuration; gapTotal += gap; cursor = nextStart;
     });
     return { items, filmTotal, gapTotal, total: cursor, loop };
@@ -344,6 +350,14 @@ foreach ($devices as $device) {
         status.classList.toggle('adjusted', item.gap > 0);
         const reset = row.querySelector('[data-action=reset-gap]');
         if (reset) reset.hidden = item.gap <= 0;
+        const offsetInputs = row.querySelectorAll('[data-time=start-offset] input');
+        const offsetError = row.querySelector('[data-offset-error]');
+        const invalidOffset = item.startOffset >= item.sourceDuration;
+        const offsetMessage = invalidOffset ? 'Start position must be earlier than the film duration.' : '';
+        offsetError.textContent = offsetMessage;
+        offsetInputs.forEach(input => { input.setCustomValidity(offsetMessage); input.classList.toggle('invalid', invalidOffset); });
+        row.querySelector('[data-action=reset-offset]').hidden = item.startOffset <= 0;
+        row.querySelector('[data-played-duration]').textContent = `Plays ${duration(item.filmDuration)} from ${duration(item.startOffset)}`;
       }
     });
     document.getElementById('playlistTotal').textContent = duration(timeline.total);
@@ -383,8 +397,8 @@ foreach ($devices as $device) {
     if (autoExpiryUntil.checked && recurrenceUntil.value !== recurrenceUntil.dataset.autoValue) autoExpiryUntil.checked = false;
     syncExpiryEndDate();
   });
-  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, gapAfterMs: 0 }); picker.value = ''; render(); };
-  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, gapAfterMs: item.gapAfterMs || 0 })); render();
+  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, startOffsetMs: 0, gapAfterMs: 0 }); picker.value = ''; render(); };
+  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, startOffsetMs: item.startOffsetMs || 0, gapAfterMs: item.gapAfterMs || 0 })); render();
 })();
 </script>
 <?= view('web/_layout_bottom') ?>

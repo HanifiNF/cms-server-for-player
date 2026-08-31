@@ -62,4 +62,19 @@ final class ScheduleTimelineTest extends CIUnitTestCase
         $this->expectException(\InvalidArgumentException::class);
         (new ScheduleTimeline())->gapFromBoundary(0, ScheduleTimeline::MAX_GAP_MS + 1);
     }
+
+    public function testPlaybackStartOffsetReducesOnlyTheEffectiveFilmDuration(): void
+    {
+        $timeline = (new ScheduleTimeline())->calculate([
+            ['duration_override_ms' => 600_000, 'playback_start_offset_ms' => 120_000, 'gap_after_ms' => 30_000],
+            ['duration_override_ms' => 300_000, 'playback_start_offset_ms' => 60_000, 'gap_after_ms' => 0],
+        ]);
+
+        $this->assertSame(720_000, $timeline['film_duration_ms']);
+        $this->assertSame(30_000, $timeline['gap_duration_ms']);
+        $this->assertSame(750_000, $timeline['total_duration_ms']);
+        $this->assertSame(480_000, $timeline['items'][0]['effective_duration_ms']);
+        $this->assertSame(510_000, $timeline['items'][1]['start_offset_ms']);
+        $this->assertSame(750_000, $timeline['items'][1]['content_end_offset_ms']);
+    }
 }

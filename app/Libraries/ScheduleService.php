@@ -219,7 +219,8 @@ class ScheduleService
                 $entry = [
                     'mediaKey' => $item['media_key'],
                     'title' => $item['title_snapshot'],
-                    'durationMs' => (int) $item['duration_override_ms'],
+                    'durationMs' => max(0, (int) $item['duration_override_ms'] - (int) ($item['playback_start_offset_ms'] ?? 0)),
+                    'startOffsetMs' => (int) ($item['playback_start_offset_ms'] ?? 0),
                     'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0),
                     'order' => (int) $item['position'],
                 ];
@@ -318,6 +319,7 @@ class ScheduleService
 
         $keys = is_array($input['media_keys'] ?? null) ? array_values($input['media_keys']) : [];
         $durations = is_array($input['duration_ms'] ?? null) ? array_values($input['duration_ms']) : [];
+        $playbackStartOffsets = is_array($input['playback_start_offset_ms'] ?? null) ? array_values($input['playback_start_offset_ms']) : [];
         $gaps = is_array($input['gap_after_ms'] ?? null) ? array_values($input['gap_after_ms']) : [];
         $loopEnabled = isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1';
         if ($keys === []) $errors['playlist'] = 'Add at least one Ready media item.';
@@ -360,6 +362,12 @@ class ScheduleService
                 $errors["duration.{$index}"] = 'Each duration must be between 1 millisecond and 24 hours.';
                 continue;
             }
+            $playbackStartOffsetMs = filter_var($playbackStartOffsets[$index] ?? 0, FILTER_VALIDATE_INT);
+            $playbackStartOffsetMs = $playbackStartOffsetMs === false ? -1 : (int) $playbackStartOffsetMs;
+            if ($playbackStartOffsetMs < 0 || $playbackStartOffsetMs >= $duration) {
+                $errors["playback_start_offset.{$index}"] = 'Film start position must be at least 0 and earlier than its duration.';
+                continue;
+            }
             $gapAfterMs = filter_var($gaps[$index] ?? 0, FILTER_VALIDATE_INT);
             $gapAfterMs = $gapAfterMs === false ? -1 : (int) $gapAfterMs;
             if ($gapAfterMs < 0 || $gapAfterMs > 86400000) {
@@ -372,6 +380,7 @@ class ScheduleService
                 'media_key' => $key,
                 'title_snapshot' => $titleSnapshot,
                 'duration_override_ms' => $duration,
+                'playback_start_offset_ms' => $playbackStartOffsetMs,
                 'gap_after_ms' => $gapAfterMs,
             ];
         }

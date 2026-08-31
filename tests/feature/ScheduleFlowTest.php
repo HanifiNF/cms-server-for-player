@@ -133,6 +133,48 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertArrayNotHasKey('startTime', $playlist[1], 'No per-film start-time variable should be introduced.');
     }
 
+    public function testFilmPlaybackStartOffsetControlsTimelineAndPlayerSeekContract(): void
+    {
+        $fixture = $this->fixture();
+        $start = (new \DateTimeImmutable('+35 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i:s');
+
+        $this->postForm('/control/schedules', [
+            'title' => 'Start Inside Films', 'device_id' => $fixture['device']->public_id,
+            'timezone' => 'Asia/Jakarta', 'start_at' => $start,
+            'media_keys' => [$fixture['localKey'], $fixture['managedKey']],
+            'duration_ms' => [60_000, 90_000],
+            'playback_start_offset_ms' => [10_000, 30_000],
+            'gap_after_ms' => [5_000, 0],
+        ], $fixture['adminId'])->assertRedirectTo('/control/schedules');
+
+        $schedule = (new ScheduleModel())->where('title', 'Start Inside Films')->first();
+        $this->assertNotNull($schedule);
+        $this->assertSame(115, $schedule->end_at->getTimestamp() - $schedule->start_at->getTimestamp());
+
+        $items = Database::connect()->table('schedule_items')->where('schedule_id', $schedule->id)->orderBy('position')->get()->getResultArray();
+        $this->assertSame([10_000, 30_000], array_map('intval', array_column($items, 'playback_start_offset_ms')));
+
+        $web = (new ScheduleService())->listForWeb()[0];
+        $this->assertSame(110_000, $web['timeline']['film_duration_ms']);
+        $this->assertSame(115_000, $web['timeline']['total_duration_ms']);
+
+        $snapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules');
+        $playlist = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['schedules'][0]['playlist'];
+        $this->assertSame(50_000, $playlist[0]['durationMs']);
+        $this->assertSame(10_000, $playlist[0]['startOffsetMs']);
+        $this->assertSame(60_000, $playlist[1]['durationMs']);
+        $this->assertSame(30_000, $playlist[1]['startOffsetMs']);
+
+        $invalidStart = (new \DateTimeImmutable('+90 minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i:s');
+        $this->postForm('/control/schedules', [
+            'title' => 'Invalid Start Offset', 'device_id' => $fixture['device']->public_id,
+            'timezone' => 'Asia/Jakarta', 'start_at' => $invalidStart,
+            'media_keys' => [$fixture['localKey']], 'duration_ms' => [60_000],
+            'playback_start_offset_ms' => [60_000],
+        ], $fixture['adminId'])->assertRedirect();
+        $this->assertSame(1, (new ScheduleModel())->countAllResults());
+    }
+
     public function testDailyScheduleSurvivesItsFirstOccurrenceAndBlocksFutureConflict(): void
     {
         $fixture = $this->fixture();
