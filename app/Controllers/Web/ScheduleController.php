@@ -127,6 +127,7 @@ class ScheduleController extends BaseController
             'media_keys' => $this->request->getPost('media_keys'), 'duration_ms' => $this->request->getPost('duration_ms'),
             'playback_start_offset_ms' => $this->request->getPost('playback_start_offset_ms'),
             'gap_after_ms' => $this->request->getPost('gap_after_ms'),
+            'volume_percent' => $this->request->getPost('volume_percent'),
         ];
     }
 

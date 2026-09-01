@@ -40,6 +40,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
             'media_keys' => [$fixture['localKey'], $fixture['managedKey']],
             'duration_ms' => [45000, 90000],
             'gap_after_ms' => [10000, 5000],
+            'volume_percent' => [80, 60],
         ], $fixture['adminId']);
         $created->assertRedirectTo('/control/schedules');
 
@@ -52,6 +53,7 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame([$fixture['localKey'], $fixture['managedKey']], array_column($items, 'media_key'));
         $this->assertSame([45000, 90000], array_map('intval', array_column($items, 'duration_override_ms')));
         $this->assertSame([10000, 5000], array_map('intval', array_column($items, 'gap_after_ms')));
+        $this->assertSame([80, 60], array_map('intval', array_column($items, 'volume_percent')));
         $this->assertSame(['Local Campaign', 'Managed Campaign'], array_column($items, 'title_snapshot'));
         $this->assertSame(37, (int) $schedule->start_at->format('s'));
 
@@ -83,6 +85,8 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame($fixture['localKey'], $payload['schedules'][0]['playlist'][0]['mediaKey']);
         $this->assertSame(10000, $payload['schedules'][0]['playlist'][0]['gapAfterMs']);
         $this->assertSame(5000, $payload['schedules'][0]['playlist'][1]['gapAfterMs']);
+        $this->assertSame(80, $payload['schedules'][0]['playlist'][0]['volumePercent']);
+        $this->assertSame(60, $payload['schedules'][0]['playlist'][1]['volumePercent']);
         $this->assertArrayNotHasKey('assetId', $payload['schedules'][0]['playlist'][0]);
         $this->assertSame($fixture['assetPublicId'], $payload['schedules'][0]['playlist'][1]['assetId']);
         $this->assertStringEndsWith('+00:00', $payload['schedules'][0]['startTime']);

@@ -281,6 +281,7 @@ class ScheduleService
                     'durationMs' => max(0, (int) $item['duration_override_ms'] - (int) ($item['playback_start_offset_ms'] ?? 0)),
                     'startOffsetMs' => (int) ($item['playback_start_offset_ms'] ?? 0),
                     'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0),
+                    'volumePercent' => (int) ($item['volume_percent'] ?? 100),
                     'order' => (int) $item['position'],
                 ];
                 if ($item['asset_public_id'] !== null) $entry['assetId'] = $item['asset_public_id'];
@@ -380,6 +381,7 @@ class ScheduleService
         $durations = is_array($input['duration_ms'] ?? null) ? array_values($input['duration_ms']) : [];
         $playbackStartOffsets = is_array($input['playback_start_offset_ms'] ?? null) ? array_values($input['playback_start_offset_ms']) : [];
         $gaps = is_array($input['gap_after_ms'] ?? null) ? array_values($input['gap_after_ms']) : [];
+        $volumes = is_array($input['volume_percent'] ?? null) ? array_values($input['volume_percent']) : [];
         $loopEnabled = isset($input['loop_enabled']) && (string) $input['loop_enabled'] === '1';
         if ($keys === []) $errors['playlist'] = 'Add at least one Ready media item.';
         if (count($keys) > 100) $errors['playlist'] = 'A playlist may contain at most 100 items.';
@@ -433,6 +435,12 @@ class ScheduleService
                 $errors["gap.{$index}"] = 'Each film gap must be between 0 milliseconds and 24 hours.';
                 continue;
             }
+            $volumePercent = filter_var($volumes[$index] ?? 100, FILTER_VALIDATE_INT);
+            $volumePercent = $volumePercent === false ? -1 : (int) $volumePercent;
+            if ($volumePercent < 0 || $volumePercent > 100) {
+                $errors["volume.{$index}"] = 'Each film volume must be between 0 and 100 percent.';
+                continue;
+            }
             $items[] = [
                 'position' => $index,
                 'asset_id' => $asset->asset_id !== null ? (int) $asset->asset_id : null,
@@ -441,6 +449,7 @@ class ScheduleService
                 'duration_override_ms' => $duration,
                 'playback_start_offset_ms' => $playbackStartOffsetMs,
                 'gap_after_ms' => $gapAfterMs,
+                'volume_percent' => $volumePercent,
             ];
         }
         $timeline = $this->timeline->calculate($items, $loopEnabled);
