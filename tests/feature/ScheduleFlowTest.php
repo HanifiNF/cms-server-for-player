@@ -33,6 +33,9 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $page->assertSee('Local Campaign');
         $page->assertSee('Managed Campaign');
         $page->assertDontSee('Missing Campaign');
+        $page->assertSee('Select assets');
+        $this->assertStringContainsString('id="mediaPickerList"', $page->response()->getBody());
+        $this->assertStringNotContainsString('id="mediaPicker"', $page->response()->getBody());
 
         $created = $this->postForm('/control/schedules', [
             'title' => 'Jakarta Morning Playlist', 'device_id' => $fixture['device']->public_id,

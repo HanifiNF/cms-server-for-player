@@ -32,6 +32,7 @@ final class MediaLibraryTaxonomyTest extends CIUnitTestCase
         $assetId = (new AssetModel())->insert([
             'public_id' => '61000000-2222-4333-8444-555555555555', 'title' => 'Mountain Preview',
             'asset_type' => 'trailer', 'filename' => 'mountain-preview.mp4', 'storage_key' => 'assets/mountain.ldg',
+            'poster_storage_key' => 'posters/mountain-preview.png', 'poster_filename' => 'mountain-preview.png', 'poster_mime_type' => 'image/png',
             'mime_type' => 'video/mp4', 'size_bytes' => 4096, 'sha256' => str_repeat('a', 64),
             'duration_ms' => 90000, 'status' => 'active', 'created_by' => $adminId,
         ], true);
@@ -69,6 +70,7 @@ final class MediaLibraryTaxonomyTest extends CIUnitTestCase
         $devices = (new ScheduleService())->readyMediaByDevice();
         $this->assertSame('trailer', $devices[0]['media'][0]['type']);
         $this->assertSame(['Historical Epic'], $devices[0]['media'][0]['genres']);
+        $this->assertStringEndsWith('/control/assets/61000000-2222-4333-8444-555555555555/poster', $devices[0]['media'][0]['posterUrl']);
 
         $assetsPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/library');
         $assetsPage->assertOK();

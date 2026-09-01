@@ -47,6 +47,9 @@ class ScheduleService
                 'type' => $asset->asset_type ?: 'featured',
                 'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
                 'expiresOn' => $asset->expires_on?->format('Y-m-d'),
+                'posterUrl' => $asset->poster_storage_key
+                    ? site_url('control/assets/' . rawurlencode((string) $asset->public_id) . '/poster')
+                    : null,
             ];
         }
 
@@ -73,6 +76,7 @@ class ScheduleService
                     'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',
                     'genres' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['genres'] ?? []) : [],
                     'expiresOn' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['expiresOn'] ?? null) : null,
+                    'posterUrl' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['posterUrl'] ?? null) : null,
                 ];
             }
             $result[] = [

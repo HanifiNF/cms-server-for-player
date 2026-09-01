@@ -80,16 +80,25 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
       <label>Start time<input id="scheduleStartTime" type="datetime-local" name="start_at" value="<?= esc($formStart) ?>" step="1" required></label>
       <label>Priority<input type="number" name="priority" value="<?= esc($formPriority) ?>" min="-100" max="100"></label>
     </div>
-    <div class="recurrence-panel" id="scheduleRecurrencePanel" data-mode="<?= esc($formRecurrence, 'attr') ?>">
-      <label class="schedule-repeat-field">Repeat<select id="scheduleRecurrence" name="recurrence"><option value="one_time" <?= $formRecurrence === 'one_time' ? 'selected' : '' ?>>One time</option><option value="daily" <?= $formRecurrence === 'daily' ? 'selected' : '' ?>>Daily</option><option value="weekly" <?= $formRecurrence === 'weekly' ? 'selected' : '' ?>>Weekly</option></select></label>
-      <fieldset id="weekdayFields"><legend>Play on</legend><div class="weekday-options"><?php foreach ([1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'] as $day => $name): ?><label><input type="checkbox" name="days_of_week[]" value="<?= $day ?>" <?= in_array($day, $formDays, true) ? 'checked' : '' ?>><?= $name ?></label><?php endforeach ?></div></fieldset>
-      <div id="recurrenceUntilField" class="schedule-until-field"><label><span class="schedule-until-label">End date <small class="field-note">(optional when every film has no expiry)</small></span><input id="scheduleRecurrenceUntil" type="date" name="recurrence_until" value="<?= esc($formUntil) ?>"></label><input type="hidden" name="auto_expiry_until" value="0"><div class="schedule-auto-expiry-field"><span>Expiry policy</span><label class="schedule-auto-expiry"><input id="scheduleAutoExpiry" type="checkbox" name="auto_expiry_until" value="1" <?= (string) $formAutoExpiry === '1' ? 'checked' : '' ?>> Use the earliest film expiry automatically</label></div><small id="scheduleExpiryHint" class="schedule-expiry-hint"></small></div>
-    </div>
     <label>Description (optional)<input name="description" value="<?= esc($formDescription) ?>" maxlength="1000" placeholder="Notes for this playback"></label>
+    <div class="schedule-compose-grid">
+      <section class="schedule-compose-card recurrence-card">
+        <div class="section-heading"><div><p>OCCURRENCE</p><h2>Repeat</h2></div></div>
+        <div class="recurrence-panel" id="scheduleRecurrencePanel" data-mode="<?= esc($formRecurrence, 'attr') ?>">
+          <label class="schedule-repeat-field">Repeat<select id="scheduleRecurrence" name="recurrence"><option value="one_time" <?= $formRecurrence === 'one_time' ? 'selected' : '' ?>>One time</option><option value="daily" <?= $formRecurrence === 'daily' ? 'selected' : '' ?>>Daily</option><option value="weekly" <?= $formRecurrence === 'weekly' ? 'selected' : '' ?>>Weekly</option></select></label>
+          <fieldset id="weekdayFields"><legend>Play on</legend><div class="weekday-options"><?php foreach ([1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'] as $day => $name): ?><label><input type="checkbox" name="days_of_week[]" value="<?= $day ?>" <?= in_array($day, $formDays, true) ? 'checked' : '' ?>><?= $name ?></label><?php endforeach ?></div></fieldset>
+          <div id="recurrenceUntilField" class="schedule-until-field"><label><span class="schedule-until-label">End date <small class="field-note">(optional when every film has no expiry)</small></span><input id="scheduleRecurrenceUntil" type="date" name="recurrence_until" value="<?= esc($formUntil) ?>"></label><input type="hidden" name="auto_expiry_until" value="0"><div class="schedule-auto-expiry-field"><span>Expiry policy</span><label class="schedule-auto-expiry"><input id="scheduleAutoExpiry" type="checkbox" name="auto_expiry_until" value="1" <?= (string) $formAutoExpiry === '1' ? 'checked' : '' ?>> Use the earliest film expiry automatically</label></div><small id="scheduleExpiryHint" class="schedule-expiry-hint"></small></div>
+        </div>
+      </section>
+      <section class="schedule-compose-card asset-selection-card">
+        <div class="section-heading"><div><p>MEDIA LIBRARY</p><h2>Select assets</h2></div><span id="mediaPickerCount" class="badge">0 Ready</span></div>
+        <div class="media-picker-filters"><input id="mediaSearch" type="search" placeholder="Search film title or filename"><select id="mediaTypeFilter"><option value="">All types</option><option value="featured">Featured</option><option value="ads">Ads</option><option value="trailer">Trailer</option><option value="local">Local media</option></select><select id="mediaGenreFilter"><option value="">All genres</option></select></div>
+        <div id="mediaPickerList" class="media-picker-list"></div>
+        <div id="mediaPickerEmpty" class="empty media-picker-empty">Choose one or more Studios to see Ready media.</div>
+      </section>
+    </div>
     <div class="playlist-builder">
-      <div class="section-heading"><div><p>PLAYLIST</p><h2>Ready media on every selected Studio</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
-      <div class="media-picker-filters"><input id="mediaSearch" type="search" placeholder="Search media title"><select id="mediaTypeFilter"><option value="">All types</option><option value="featured">Featured</option><option value="ads">Ads</option><option value="trailer">Trailer</option><option value="local">Local media</option></select><select id="mediaGenreFilter"><option value="">All genres</option></select></div>
-      <div class="playlist-picker"><select id="mediaPicker"><option value="">Select Ready media</option></select><button id="addMedia" type="button" class="btn ghost">Add to playlist</button></div>
+      <div class="section-heading"><div><p>PLAYLIST</p><h2>Selected assets</h2></div><span id="playlistTotal" class="badge">00:00:00</span></div>
       <div class="playlist-timeline-summary" aria-live="polite">
         <span><small>SCHEDULE START</small><strong id="timelineScheduleStart">—</strong></span>
         <span><small>SCHEDULE END</small><strong id="timelineScheduleEnd">—</strong></span>
@@ -178,7 +187,9 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
   const targetSearch = document.getElementById('scheduleTargetSearch');
   const targetChecks = [...document.querySelectorAll('[data-target-device]')];
   const locationGroups = [...document.querySelectorAll('[data-target-location]')];
-  const picker = document.getElementById('mediaPicker');
+  const mediaPickerList = document.getElementById('mediaPickerList');
+  const mediaPickerEmpty = document.getElementById('mediaPickerEmpty');
+  const mediaPickerCount = document.getElementById('mediaPickerCount');
   const rows = document.getElementById('playlistRows');
   const recurrence = document.getElementById('scheduleRecurrence');
   const recurrenceUntil = document.getElementById('scheduleRecurrenceUntil');
@@ -260,11 +271,45 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
       : `Limited by ${limitingMedia.title}, which expires on ${limit}.`;
     expiryHint.classList.toggle('warning', tooLate);
   }
-  function rebuildPicker() {
+  function renderMediaPicker() {
     const available = mediaMap();
-    picker.innerHTML = '<option value="">Select Ready media</option>';
     const search = mediaSearch.value.trim().toLowerCase(); const type = mediaTypeFilter.value; const genre = mediaGenreFilter.value;
-    for (const item of available.values()) { if (search && !`${item.title} ${item.filename}`.toLowerCase().includes(search)) continue; if (type && item.type !== type) continue; if (genre && !(item.genres || []).includes(genre)) continue; const option = document.createElement('option'); option.value = item.mediaKey; option.textContent = `${item.title} · ${String(item.type || 'local').toUpperCase()} · ${duration(item.durationMs)} · ${item.source === 'managed' ? 'Downloaded' : 'Media Folder'}`; picker.appendChild(option); }
+    const selectedKeys = new Set(playlist.map(item => item.mediaKey));
+    const visible = [...available.values()].filter(item => {
+      const searchable = `${item.title} ${item.filename} ${item.type || ''} ${(item.genres || []).join(' ')}`.toLowerCase();
+      return (!search || searchable.includes(search)) && (!type || item.type === type) && (!genre || (item.genres || []).includes(genre));
+    });
+    mediaPickerList.innerHTML = '';
+    mediaPickerCount.textContent = `${visible.length}${visible.length !== available.size ? ` of ${available.size}` : ''} Ready`;
+    for (const item of visible) {
+      const selected = selectedKeys.has(item.mediaKey);
+      const card = document.createElement('article'); card.className = `media-choice-card${selected ? ' selected' : ''}`;
+      const poster = document.createElement('div'); poster.className = 'media-choice-poster';
+      const fallback = document.createElement('span'); fallback.className = 'media-choice-poster-fallback'; fallback.textContent = String(item.title || 'M').trim().charAt(0).toUpperCase() || 'M';
+      poster.appendChild(fallback);
+      if (item.posterUrl) {
+        const image = document.createElement('img'); image.src = item.posterUrl; image.alt = ''; image.loading = 'lazy';
+        image.addEventListener('load', () => { fallback.hidden = true; });
+        image.addEventListener('error', () => { image.hidden = true; fallback.hidden = false; });
+        poster.prepend(image);
+      }
+      const copy = document.createElement('div'); copy.className = 'media-choice-copy';
+      const heading = document.createElement('div'); heading.className = 'media-choice-heading';
+      const title = document.createElement('strong'); title.textContent = item.title || item.filename || 'Untitled media'; title.title = title.textContent;
+      const typeBadge = document.createElement('span'); typeBadge.className = 'media-choice-type'; typeBadge.textContent = String(item.type || 'local').toUpperCase();
+      heading.append(title, typeBadge);
+      const filename = document.createElement('small'); filename.textContent = item.filename || 'Unknown filename'; filename.title = filename.textContent;
+      const facts = document.createElement('div'); facts.className = 'media-choice-facts';
+      for (const value of [duration(item.durationMs), item.source === 'managed' ? 'Downloaded' : 'Media Folder', ...(item.genres || []).slice(0, 2)]) { const chip = document.createElement('span'); chip.textContent = value; facts.appendChild(chip); }
+      if (item.expiresOn) { const expiry = document.createElement('span'); expiry.className = 'media-choice-expiry'; expiry.textContent = `Expires ${item.expiresOn}`; facts.appendChild(expiry); }
+      copy.append(heading, filename, facts);
+      const add = document.createElement('button'); add.type = 'button'; add.className = `btn ${selected ? 'ghost' : 'primary'} media-choice-action`; add.textContent = selected ? 'Selected' : 'Add'; add.disabled = selected;
+      add.addEventListener('click', () => { if (selectedKeys.has(item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, startOffsetMs: 0, gapAfterMs: 0, volumePercent: 100 }); render(); });
+      card.append(poster, copy, add); mediaPickerList.appendChild(card);
+    }
+    const hasTargets = selectedDevices().length > 0;
+    mediaPickerEmpty.textContent = !hasTargets ? 'Choose one or more Studios to see Ready media.' : (available.size === 0 ? 'No Ready media is shared by every selected Studio.' : 'No media matches these filters.');
+    mediaPickerEmpty.hidden = visible.length > 0;
   }
   function rebuildGenreFilter() { const selected = mediaGenreFilter.value; const genres = [...new Set([...mediaMap().values()].flatMap(item => item.genres || []))].sort(); mediaGenreFilter.innerHTML = '<option value="">All genres</option>'; for (const genre of genres) { const option = document.createElement('option'); option.value = genre; option.textContent = genre; mediaGenreFilter.appendChild(option); } if (genres.includes(selected)) mediaGenreFilter.value = selected; }
   function render() {
@@ -318,7 +363,7 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
       row.querySelector('[data-action=reset-offset]').onclick = () => { entry.startOffsetMs = 0; render(); };
       row.querySelector('[data-action=remove]').onclick = () => { playlist.splice(index, 1); render(); }; rows.appendChild(row);
     });
-    document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; updateTotal(); syncExpiryEndDate();
+    document.getElementById('playlistEmpty').style.display = playlist.length ? 'none' : 'block'; renderMediaPicker(); updateTotal(); syncExpiryEndDate();
   }
   function zonedEpoch(value) {
     const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
@@ -423,7 +468,7 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     document.getElementById('timelineScheduleEnd').textContent = startEpoch === null ? '—' : formatMoment(startEpoch + timeline.total);
     document.getElementById('timelineTimezone').textContent = timezoneInput.value || '—';
   }
-  function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); render(); }
+  function targetsChanged() { updateTargetSummary(); rebuildGenreFilter(); render(); }
   for (const check of targetChecks) check.addEventListener('change', targetsChanged);
   for (const group of locationGroups) {
     const parent = group.querySelector('[data-target-location-check]');
@@ -443,7 +488,7 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     document.getElementById('scheduleTargetEmpty').hidden = visibleGroups > 0;
   });
   document.addEventListener('click', event => { if (targetPicker.open && !targetPicker.contains(event.target)) targetPicker.open = false; });
-  mediaSearch.addEventListener('input', rebuildPicker); mediaTypeFilter.addEventListener('change', rebuildPicker); mediaGenreFilter.addEventListener('change', rebuildPicker);
+  mediaSearch.addEventListener('input', renderMediaPicker); mediaTypeFilter.addEventListener('change', renderMediaPicker); mediaGenreFilter.addEventListener('change', renderMediaPicker);
   startInput.addEventListener('input', updateTotal); timezoneInput.addEventListener('change', updateTotal);
   recurrence.addEventListener('change', updateRecurrenceFields);
   autoExpiryUntil.addEventListener('change', syncExpiryEndDate);
@@ -452,8 +497,7 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     if (autoExpiryUntil.checked && recurrenceUntil.value !== recurrenceUntil.dataset.autoValue) autoExpiryUntil.checked = false;
     syncExpiryEndDate();
   });
-  document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, startOffsetMs: 0, gapAfterMs: 0, volumePercent: 100 }); picker.value = ''; render(); };
-  updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, startOffsetMs: item.startOffsetMs || 0, gapAfterMs: item.gapAfterMs || 0, volumePercent: Number.isFinite(Number(item.volumePercent)) ? Number(item.volumePercent) : 100 })); render();
+  updateTargetSummary(); rebuildGenreFilter(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, startOffsetMs: item.startOffsetMs || 0, gapAfterMs: item.gapAfterMs || 0, volumePercent: Number.isFinite(Number(item.volumePercent)) ? Number(item.volumePercent) : 100 })); render();
 })();
 </script>
 <script>
