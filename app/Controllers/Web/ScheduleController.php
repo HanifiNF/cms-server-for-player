@@ -18,6 +18,7 @@ class ScheduleController extends BaseController
     {
         (new AssetExpiryService())->expireDue();
         $service = new ScheduleService();
+        $directory = $service->directory((array) $this->request->getGet());
         $editId = trim((string) $this->request->getGet('edit'));
         $editing = $editId !== '' ? $service->findForWeb($editId) : null;
         if ($editing !== null) {
@@ -31,7 +32,8 @@ class ScheduleController extends BaseController
         }
         return view('web/schedules', [
             'title' => 'Schedules', 'active' => 'schedules', 'admin' => $this->admin(),
-            'devices' => $service->readyMediaByDevice(), 'schedules' => $service->listForWeb(),
+            'devices' => $service->readyMediaByDevice(), 'schedules' => $directory['rows'],
+            'scheduleDirectory' => $directory,
             'editing' => $editing,
         ]);
     }
@@ -84,6 +86,32 @@ class ScheduleController extends BaseController
         }
     }
 
+    public function bulkDisable(): RedirectResponse
+    {
+        try {
+            $result = (new ScheduleService())->disableMany($this->selectedScheduleIds());
+            return $this->directoryRedirect()->with('success', $result['changed'] . ' schedule(s) disabled. Target Players were notified through realtime sync.');
+        } catch (ScheduleValidationException $error) {
+            return $this->directoryRedirect()->with('errors', $error->errors);
+        } catch (Throwable $error) {
+            log_message('error', 'Bulk schedule disable failed: {message}', ['message' => $error->getMessage()]);
+            return $this->directoryRedirect()->with('error', 'The selected schedules could not be disabled.');
+        }
+    }
+
+    public function bulkDelete(): RedirectResponse
+    {
+        try {
+            $result = (new ScheduleService())->deleteMany($this->selectedScheduleIds());
+            return $this->directoryRedirect()->with('success', $result['changed'] . ' schedule(s) deleted. Target Players were notified through realtime sync.');
+        } catch (ScheduleValidationException $error) {
+            return $this->directoryRedirect()->with('errors', $error->errors);
+        } catch (Throwable $error) {
+            log_message('error', 'Bulk schedule deletion failed: {message}', ['message' => $error->getMessage()]);
+            return $this->directoryRedirect()->with('error', 'The selected schedules could not be deleted.');
+        }
+    }
+
     /** @return array<string, mixed> */
     private function payload(): array
     {
@@ -105,5 +133,23 @@ class ScheduleController extends BaseController
     private function admin(): object
     {
         return (new UserModel())->find((int) session()->get('cms_web_user_id'));
+    }
+
+    /** @return list<string> */
+    private function selectedScheduleIds(): array
+    {
+        $ids = $this->request->getPost('schedule_ids');
+        return is_array($ids) ? array_values(array_map('strval', $ids)) : [];
+    }
+
+    private function directoryRedirect(): RedirectResponse
+    {
+        $query = ltrim(trim((string) $this->request->getPost('return_query')), '?');
+        parse_str($query, $values);
+        $allowed = array_intersect_key((array) $values, array_flip([
+            'q', 'location_ids', 'device_ids', 'asset_ids', 'date_from', 'date_to', 'period', 'status', 'page',
+        ]));
+        $suffix = $allowed === [] ? '' : '?' . http_build_query($allowed);
+        return redirect()->to('/control/schedules' . $suffix);
     }
 }

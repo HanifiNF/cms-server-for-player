@@ -40,9 +40,33 @@ foreach ($devices as $device) {
     $deviceGroups[$locationKey]['devices'][] = $device;
     $availableTimezones[(string) $device['timezone']] = (string) $device['timezone'];
 }
+$scheduleDirectory ??= ['all' => $schedules, 'filters' => [], 'options' => ['locations' => [], 'assets' => []], 'total' => count($schedules), 'total_all' => count($schedules), 'page' => 1, 'pages' => 1];
+$directoryFilters = $scheduleDirectory['filters'];
+$directoryOptions = $scheduleDirectory['options'];
+$filteredSchedules = $scheduleDirectory['all'];
+$directoryQuery = http_build_query(array_filter($directoryFilters, static fn ($value): bool => $value !== null && $value !== '' && $value !== []));
+$pageQuery = static function (int $page) use ($directoryFilters): string {
+    $values = $directoryFilters;
+    $values['page'] = $page;
+    return http_build_query(array_filter($values, static fn ($value): bool => $value !== null && $value !== '' && $value !== []));
+};
+$selectedLocations = (array) ($directoryFilters['location_ids'] ?? []);
+$selectedStudios = (array) ($directoryFilters['device_ids'] ?? []);
+$selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
 ?>
-<div class="cms-page-toolbar"><div><p>DELIVERY PLAN</p><h2>Playback schedules</h2><span>Create one-time, daily, or weekly playlists for one or more Studios.</span></div><div class="cms-toolbar-actions"><span class="count"><?= count($schedules) ?> Schedules</span><button class="btn primary" type="button" data-cms-modal-open="schedule-editor-modal" <?= $devices === [] ? 'disabled title="Pair an active Studio first"' : '' ?>>+ Create Schedule</button></div></div>
+<div class="cms-page-toolbar"><div><p>DELIVERY PLAN</p><h2>Playback schedules</h2><span>Create one-time, daily, or weekly playlists for one or more Studios.</span></div><div class="cms-toolbar-actions"><span class="count"><?= (int) $scheduleDirectory['total'] ?> of <?= (int) $scheduleDirectory['total_all'] ?> Schedules</span><button class="btn ghost" type="button" data-cms-modal-open="bulk-disable-schedules" <?= $filteredSchedules === [] ? 'disabled' : '' ?>>Disable Schedules</button><button class="btn danger" type="button" data-cms-modal-open="bulk-delete-schedules" <?= $filteredSchedules === [] ? 'disabled' : '' ?>>Delete Schedules</button><button class="btn primary" type="button" data-cms-modal-open="schedule-editor-modal" <?= $devices === [] ? 'disabled title="Pair an active Studio first"' : '' ?>>+ Create Schedule</button></div></div>
 <?php if ($devices === []): ?><div class="alert error">Create and pair an active Studio before adding schedules.</div><?php endif ?>
+
+<form class="schedule-directory-filter" method="get" action="<?= site_url('control/schedules') ?>" id="scheduleDirectoryFilter">
+  <label class="schedule-filter-search">Search schedules<input type="search" name="q" value="<?= esc($directoryFilters['q'] ?? '') ?>" placeholder="Title, Studio, Location, asset, day, or date"></label>
+  <details class="schedule-filter-picker" id="directoryLocationPicker"><summary><span>Location / Studio<?= $selectedLocations || $selectedStudios ? ' · ' . (count($selectedLocations) + count($selectedStudios)) : '' ?></span><b>⌄</b></summary><div class="schedule-filter-popover"><input type="search" data-filter-options-search placeholder="Search Location or Studio"><div class="schedule-filter-options"><?php foreach ($directoryOptions['locations'] as $location): ?><details data-directory-location data-search-text="<?= esc(mb_strtolower($location['name'] . ' ' . implode(' ', array_column($location['studios'], 'name'))), 'attr') ?>"><summary><label><input type="checkbox" name="location_ids[]" value="<?= esc($location['id'], 'attr') ?>" data-directory-location-check <?= in_array($location['id'], $selectedLocations, true) ? 'checked' : '' ?>><span><strong><?= esc($location['name']) ?></strong><small><?= count($location['studios']) ?> Studio(s)</small></span></label><b>⌄</b></summary><div><?php foreach ($location['studios'] as $studio): ?><label data-search-text="<?= esc(mb_strtolower($studio['name']), 'attr') ?>"><input type="checkbox" name="device_ids[]" value="<?= esc($studio['id'], 'attr') ?>" data-directory-device data-location-id="<?= esc($location['id'], 'attr') ?>" <?= in_array($studio['id'], $selectedStudios, true) ? 'checked' : '' ?>><span><?= esc($studio['name']) ?></span></label><?php endforeach ?></div></details><?php endforeach ?></div></div></details>
+  <details class="schedule-filter-picker" id="directoryAssetPicker"><summary><span>Assets<?= $selectedAssets ? ' · ' . count($selectedAssets) : '' ?></span><b>⌄</b></summary><div class="schedule-filter-popover"><input type="search" data-filter-options-search placeholder="Search asset"><div class="schedule-filter-options asset-options"><?php foreach ($directoryOptions['assets'] as $asset): ?><label data-directory-asset data-search-text="<?= esc(mb_strtolower($asset['title']), 'attr') ?>" data-location-ids="<?= esc(implode(',', $asset['location_ids']), 'attr') ?>" data-device-ids="<?= esc(implode(',', $asset['device_ids']), 'attr') ?>"><input type="checkbox" name="asset_ids[]" value="<?= esc($asset['id'], 'attr') ?>" <?= in_array($asset['id'], $selectedAssets, true) ? 'checked' : '' ?>><span><?= esc($asset['title']) ?></span></label><?php endforeach ?><p class="empty" data-directory-asset-empty hidden>No schedule asset is available for the selected target.</p></div></div></details>
+  <label>Date from<input type="date" name="date_from" value="<?= esc($directoryFilters['date_from'] ?? '') ?>"></label>
+  <label>Date to<input type="date" name="date_to" value="<?= esc($directoryFilters['date_to'] ?? '') ?>"></label>
+  <label>Time<select name="period"><option value="">Any time</option><option value="morning" <?= in_array('morning', (array) ($directoryFilters['period'] ?? []), true) ? 'selected' : '' ?>>Morning · 00:00–09:00</option><option value="noon" <?= in_array('noon', (array) ($directoryFilters['period'] ?? []), true) ? 'selected' : '' ?>>Noon · 09:00–15:00</option><option value="night" <?= in_array('night', (array) ($directoryFilters['period'] ?? []), true) ? 'selected' : '' ?>>Night · 15:00–24:00</option></select></label>
+  <label>Status<select name="status"><option value="">Any status</option><?php foreach (['active' => 'Active now', 'upcoming' => 'Upcoming', 'completed' => 'Completed', 'disabled' => 'Disabled'] as $value => $label): ?><option value="<?= $value ?>" <?= in_array($value, (array) ($directoryFilters['status'] ?? []), true) ? 'selected' : '' ?>><?= $label ?></option><?php endforeach ?></select></label>
+  <div class="schedule-filter-actions"><a class="btn ghost" href="<?= site_url('control/schedules') ?>">Reset</a><button class="btn primary" type="submit">Apply Filters</button></div>
+</form>
 <dialog class="cms-action-modal full" id="schedule-editor-modal" data-cms-modal <?= $editing || old('_modal_context') === 'schedule-editor' ? 'data-auto-open="true"' : '' ?>>
   <form id="scheduleForm" method="post" action="<?= $editing ? site_url('control/schedules/' . rawurlencode($editing['public_id']) . '/update') : site_url('control/schedules') ?>" class="cms-modal-shell schedule-form schedule-modal-form">
     <?= csrf_field() ?><input type="hidden" name="_modal_context" value="schedule-editor">
@@ -82,9 +106,31 @@ foreach ($devices as $device) {
   </form>
 </dialog>
 
+<?php foreach (['disable' => ['title' => 'Disable schedules', 'action' => 'bulk-disable', 'button' => 'Disable selected', 'message' => 'Future occurrences stop on every target Player. Existing playback is not forcibly interrupted.'], 'delete' => ['title' => 'Delete schedules', 'action' => 'bulk-delete', 'button' => 'Delete selected', 'message' => 'This permanently removes the selected schedules and their cached Player definitions.']] as $bulkMode => $bulk): ?>
+<dialog class="cms-action-modal wide schedule-bulk-modal" id="bulk-<?= $bulkMode ?>-schedules" data-cms-modal>
+  <form method="post" action="<?= site_url('control/schedules/' . $bulk['action']) ?>" class="cms-modal-shell" data-bulk-schedule-form>
+    <?= csrf_field() ?><input type="hidden" name="return_query" value="<?= esc($directoryQuery, 'attr') ?>">
+    <header class="cms-modal-header"><div><p>BULK SCHEDULE MANAGEMENT</p><h2><?= esc($bulk['title']) ?></h2><span>The active directory filters are already applied. Select up to 100 schedules.</span></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header>
+    <div class="cms-modal-body">
+      <div class="cms-confirm-message <?= $bulkMode === 'delete' ? 'danger' : '' ?>"><strong><?= esc($bulk['message']) ?></strong>One device revision and realtime notification is produced per affected Studio.</div>
+      <div class="schedule-bulk-tools"><input type="search" data-bulk-schedule-search placeholder="Search within these <?= (int) $scheduleDirectory['total'] ?> results"><label><input type="checkbox" data-bulk-select-visible> Select visible</label><strong data-bulk-selection-count>0 selected</strong></div>
+      <div class="schedule-bulk-list">
+        <?php foreach ($filteredSchedules as $schedule):
+          $bulkText = mb_strtolower($schedule['title'] . ' ' . implode(' ', array_column($schedule['targets'], 'name')) . ' ' . implode(' ', array_column($schedule['targets'], 'location')) . ' ' . implode(' ', array_column($schedule['items'], 'title_snapshot')) . ' ' . $schedule['display_status']);
+          $cannotDisable = $bulkMode === 'disable' && $schedule['status'] === 'disabled';
+        ?>
+        <label data-bulk-schedule-row data-search-text="<?= esc($bulkText, 'attr') ?>" class="<?= $cannotDisable ? 'disabled' : '' ?>"><input type="checkbox" name="schedule_ids[]" value="<?= esc($schedule['public_id'], 'attr') ?>" data-bulk-schedule-check <?= $cannotDisable ? 'disabled' : '' ?>><span><strong><?= esc($schedule['title']) ?></strong><small><?= esc(implode(', ', array_column($schedule['targets'], 'name'))) ?> · <?= esc(strtoupper($schedule['display_status'])) ?> · <?= count($schedule['items']) ?> asset(s)</small></span></label>
+        <?php endforeach ?>
+      </div>
+    </div>
+    <footer class="cms-modal-footer"><span>Only explicitly selected schedules are changed.</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $bulkMode === 'delete' ? 'danger' : 'primary' ?>" type="submit" data-bulk-submit disabled><?= esc($bulk['button']) ?></button></div></footer>
+  </form>
+</dialog>
+<?php endforeach ?>
+
 <section class="schedule-list">
-  <div class="section-heading"><div><p>SCHEDULE DIRECTORY</p><h2>All schedules</h2></div><span class="badge"><?= count($schedules) ?> schedules</span></div>
-  <?php if ($schedules === []): ?><article class="card empty">No schedules yet. Create one above and refresh the target Studio.</article><?php endif ?>
+  <div class="section-heading"><div><p>SCHEDULE DIRECTORY</p><h2>Matching schedules</h2></div><span class="badge"><?= (int) $scheduleDirectory['total'] ?> results</span></div>
+  <?php if ($schedules === []): ?><article class="card empty">No schedule matches these filters. Reset the filters or create a new schedule.</article><?php endif ?>
   <?php foreach ($schedules as $schedule):
     $tz = new DateTimeZone($schedule['timezone']);
     $start = (new DateTimeImmutable($schedule['start_at'], new DateTimeZone('UTC')))->setTimezone($tz);
@@ -120,6 +166,7 @@ foreach ($devices as $device) {
     <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
     <dialog class="cms-action-modal" id="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/delete') ?>" class="cms-modal-shell"><?= csrf_field() ?><header class="cms-modal-header"><div><p>DANGER ZONE</p><h2>Delete <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message danger"><strong>This schedule will be permanently removed.</strong>All target Players remove it from their local schedule cache on the next refresh.</div></div><footer class="cms-modal-footer"><span>Permanent deletion</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn danger" type="submit">Delete Schedule</button></div></footer></form></dialog>
   <?php endforeach ?>
+  <?php if ((int) $scheduleDirectory['pages'] > 1): ?><nav class="schedule-pagination" aria-label="Schedule directory pages"><?php if ((int) $scheduleDirectory['page'] > 1): ?><a class="page-move" href="<?= site_url('control/schedules') . '?' . esc($pageQuery((int) $scheduleDirectory['page'] - 1), 'attr') ?>">← Previous</a><?php endif ?><?php for ($page = 1; $page <= (int) $scheduleDirectory['pages']; $page++): ?><a class="<?= $page === (int) $scheduleDirectory['page'] ? 'active' : '' ?>" href="<?= site_url('control/schedules') . '?' . esc($pageQuery($page), 'attr') ?>" <?= $page === (int) $scheduleDirectory['page'] ? 'aria-current="page"' : '' ?>><?= $page ?></a><?php endfor ?><?php if ((int) $scheduleDirectory['page'] < (int) $scheduleDirectory['pages']): ?><a class="page-move" href="<?= site_url('control/schedules') . '?' . esc($pageQuery((int) $scheduleDirectory['page'] + 1), 'attr') ?>">Next →</a><?php endif ?></nav><?php endif ?>
 </section>
 <script>
 (() => {
@@ -399,6 +446,89 @@ foreach ($devices as $device) {
   });
   document.getElementById('addMedia').onclick = () => { const item = mediaMap().get(picker.value); if (!item || playlist.some(entry => entry.mediaKey === item.mediaKey)) return; playlist.push({ mediaKey: item.mediaKey, durationMs: item.durationMs, startOffsetMs: 0, gapAfterMs: 0 }); picker.value = ''; render(); };
   updateTargetSummary(); rebuildGenreFilter(); rebuildPicker(); updateRecurrenceFields(); const available = mediaMap(); playlist = initial.filter(item => available.has(item.mediaKey)).map(item => ({ mediaKey: item.mediaKey, durationMs: item.durationMs || available.get(item.mediaKey).durationMs, startOffsetMs: item.startOffsetMs || 0, gapAfterMs: item.gapAfterMs || 0 })); render();
+})();
+</script>
+<script>
+(() => {
+  const filterForm = document.getElementById('scheduleDirectoryFilter');
+  if (filterForm) {
+    const locationGroups = [...filterForm.querySelectorAll('[data-directory-location]')];
+    const locationChecks = [...filterForm.querySelectorAll('[data-directory-location-check]')];
+    const deviceChecks = [...filterForm.querySelectorAll('[data-directory-device]')];
+    const assetRows = [...filterForm.querySelectorAll('[data-directory-asset]')];
+    const refreshAssets = () => {
+      const locations = new Set(locationChecks.filter(check => check.checked).map(check => check.value));
+      const devices = new Set(deviceChecks.filter(check => check.checked).map(check => check.value));
+      let visible = 0;
+      for (const row of assetRows) {
+        const rowLocations = new Set((row.dataset.locationIds || '').split(',').filter(Boolean));
+        const rowDevices = new Set((row.dataset.deviceIds || '').split(',').filter(Boolean));
+        const targetMatch = (!locations.size && !devices.size)
+          || [...locations].some(id => rowLocations.has(id))
+          || [...devices].some(id => rowDevices.has(id));
+        row.hidden = !targetMatch;
+        if (targetMatch) visible++;
+      }
+      filterForm.querySelector('[data-directory-asset-empty]').hidden = visible > 0;
+    };
+    const syncLocation = (group, source = 'studio') => {
+      const location = group.querySelector('[data-directory-location-check]');
+      const studios = [...group.querySelectorAll('[data-directory-device]')];
+      if (source === 'location') {
+        for (const studio of studios) studio.checked = location.checked;
+        location.indeterminate = false;
+      } else {
+        const selected = studios.filter(studio => studio.checked).length;
+        location.checked = studios.length > 0 && selected === studios.length;
+        location.indeterminate = selected > 0 && selected < studios.length;
+      }
+    };
+    for (const group of locationGroups) {
+      const location = group.querySelector('[data-directory-location-check]');
+      const studios = [...group.querySelectorAll('[data-directory-device]')];
+      location.addEventListener('click', event => event.stopPropagation());
+      location.addEventListener('change', () => { syncLocation(group, 'location'); refreshAssets(); });
+      for (const studio of studios) studio.addEventListener('change', () => { syncLocation(group); refreshAssets(); });
+      syncLocation(group, location.checked ? 'location' : 'studio');
+    }
+    for (const input of filterForm.querySelectorAll('[data-filter-options-search]')) input.addEventListener('input', () => {
+      const query = input.value.trim().toLowerCase();
+      const container = input.closest('.schedule-filter-popover');
+      for (const option of container.querySelectorAll('[data-search-text]')) {
+        const matches = !query || (option.dataset.searchText || '').includes(query);
+        if (option.matches('[data-directory-asset]')) option.hidden = !matches;
+        else if (option.matches('details')) { option.hidden = !matches; if (query && matches) option.open = true; }
+      }
+      if (container.closest('#directoryAssetPicker')) refreshAssets();
+    });
+    refreshAssets();
+  }
+
+  for (const form of document.querySelectorAll('[data-bulk-schedule-form]')) {
+    const search = form.querySelector('[data-bulk-schedule-search]');
+    const rows = [...form.querySelectorAll('[data-bulk-schedule-row]')];
+    const checks = [...form.querySelectorAll('[data-bulk-schedule-check]')];
+    const selectVisible = form.querySelector('[data-bulk-select-visible]');
+    const count = form.querySelector('[data-bulk-selection-count]');
+    const submit = form.querySelector('[data-bulk-submit]');
+    const update = () => {
+      const selected = checks.filter(check => check.checked).length;
+      count.textContent = `${selected} selected`;
+      submit.disabled = selected === 0 || selected > 100;
+      selectVisible.checked = rows.filter(row => !row.hidden && !row.querySelector('input').disabled).every(row => row.querySelector('input').checked);
+    };
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+      for (const row of rows) row.hidden = !!query && !(row.dataset.searchText || '').includes(query);
+      update();
+    });
+    selectVisible.addEventListener('change', () => {
+      for (const row of rows) if (!row.hidden && !row.querySelector('input').disabled) row.querySelector('input').checked = selectVisible.checked;
+      update();
+    });
+    for (const check of checks) check.addEventListener('change', update);
+    update();
+  }
 })();
 </script>
 <?= view('web/_layout_bottom') ?>

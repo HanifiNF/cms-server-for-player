@@ -313,6 +313,35 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame(1, (new ScheduleModel())->countAllResults());
     }
 
+    public function testAdminCanDisableAndDeleteMultipleSchedulesWithOneDeviceRevisionPerBulkAction(): void
+    {
+        $fixture = $this->fixture();
+        foreach ([20, 40] as $minutes) {
+            $this->postForm('/control/schedules', [
+                'title' => 'Bulk ' . $minutes,
+                'device_id' => $fixture['device']->public_id,
+                'timezone' => 'Asia/Jakarta',
+                'start_at' => (new \DateTimeImmutable('+' . $minutes . ' minutes', new \DateTimeZone('Asia/Jakarta')))->format('Y-m-d\TH:i:s'),
+                'media_keys' => [$fixture['managedKey']], 'duration_ms' => [90000],
+            ], $fixture['adminId'])->assertRedirectTo('/control/schedules');
+        }
+        $schedules = (new ScheduleModel())->orderBy('id')->findAll();
+        $ids = array_map(static fn ($schedule): string => $schedule->public_id, $schedules);
+        $this->assertSame(2, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
+
+        $disabled = $this->postForm('/control/schedules/bulk-disable', [
+            'schedule_ids' => $ids, 'return_query' => 'status=upcoming&q=Bulk',
+        ], $fixture['adminId']);
+        $disabled->assertRedirectTo('/control/schedules?status=upcoming&q=Bulk');
+        $this->assertSame(['disabled', 'disabled'], array_map(static fn ($schedule): string => $schedule->status, (new ScheduleModel())->orderBy('id')->findAll()));
+        $this->assertSame(3, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
+
+        $deleted = $this->postForm('/control/schedules/bulk-delete', ['schedule_ids' => $ids], $fixture['adminId']);
+        $deleted->assertRedirectTo('/control/schedules');
+        $this->assertSame(0, (new ScheduleModel())->countAllResults());
+        $this->assertSame(4, (int) (new DeviceModel())->find($fixture['device']->id)->schedule_revision);
+    }
+
     /** @return array<string, mixed> */
     private function fixture(): array
     {

@@ -93,24 +93,35 @@ class ScheduleService
     {
         $rows = $this->db->table('schedules')->orderBy('start_at', 'DESC')->get()->getResultArray();
 
-        foreach ($rows as &$row) {
-            $row['targets'] = $this->targetsForSchedule((int) $row['id']);
-            $first = $row['targets'][0] ?? null;
-            $row['device_public_id'] = $first['public_id'] ?? null;
-            $row['device_name'] = $first['name'] ?? 'No target';
-            $row['device_location'] = $first['location'] ?? null;
-            $row['target_count'] = count($row['targets']);
-            $row['location_count'] = count(array_unique(array_column($row['targets'], 'location')));
-            $timeline = $this->timeline->calculate(
-                $this->itemsForSchedule((int) $row['id']),
-                (bool) $row['loop_enabled'],
-            );
-            $row['items'] = $timeline['items'];
-            $row['timeline'] = $timeline;
-            $row['display_status'] = $this->displayStatus($row);
-        }
-        unset($row);
-        return $rows;
+        return array_map(fn (array $row): array => $this->hydrateForWeb($row), $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array{rows:list<array<string,mixed>>,all:list<array<string,mixed>>,filters:array<string,mixed>,options:array<string,mixed>,total:int,page:int,per_page:int,pages:int}
+     */
+    public function directory(array $input, int $perPage = 20): array
+    {
+        $filter = new ScheduleDirectoryFilter($this->recurrence);
+        $filters = $filter->normalize($input);
+        $allRows = $this->listForWeb();
+        $filtered = $filter->apply($allRows, $filters);
+        $total = count($filtered);
+        $perPage = max(5, min(100, $perPage));
+        $pages = max(1, (int) ceil($total / $perPage));
+        $page = max(1, min($pages, (int) ($input['page'] ?? 1)));
+
+        return [
+            'rows' => array_slice($filtered, ($page - 1) * $perPage, $perPage),
+            'all' => $filtered,
+            'filters' => $filters,
+            'options' => $this->directoryOptions($allRows),
+            'total' => $total,
+            'total_all' => count($allRows),
+            'page' => $page,
+            'per_page' => $perPage,
+            'pages' => $pages,
+        ];
     }
 
     /** @return array<string, mixed>|null */
@@ -199,6 +210,54 @@ class ScheduleService
             $this->db->transRollback();
             throw $error;
         }
+    }
+
+    /** @param list<string> $publicIds @return array{changed:int,devices:int} */
+    public function disableMany(array $publicIds): array
+    {
+        $rows = $this->bulkSchedules($publicIds);
+        $deviceIds = [];
+        $changed = 0;
+        $this->db->transBegin();
+        try {
+            foreach ($rows as $row) {
+                if ((string) $row['status'] === 'disabled') continue;
+                $scheduleDeviceIds = $this->targetDeviceIds((int) $row['id']);
+                $this->db->table('schedules')->where('id', $row['id'])->update([
+                    'status' => 'disabled',
+                    'revision' => new RawSql('revision + 1'),
+                    'updated_at' => gmdate('Y-m-d H:i:s'),
+                ]);
+                foreach ($scheduleDeviceIds as $deviceId) $deviceIds[$deviceId] = true;
+                $changed++;
+            }
+            foreach (array_keys($deviceIds) as $deviceId) $this->bumpDeviceRevision((int) $deviceId);
+            $this->finishTransaction();
+        } catch (Throwable $error) {
+            $this->db->transRollback();
+            throw $error;
+        }
+        return ['changed' => $changed, 'devices' => count($deviceIds)];
+    }
+
+    /** @param list<string> $publicIds @return array{changed:int,devices:int} */
+    public function deleteMany(array $publicIds): array
+    {
+        $rows = $this->bulkSchedules($publicIds);
+        $deviceIds = [];
+        $this->db->transBegin();
+        try {
+            foreach ($rows as $row) {
+                foreach ($this->targetDeviceIds((int) $row['id']) as $deviceId) $deviceIds[$deviceId] = true;
+                if (! (new ScheduleModel())->delete((int) $row['id'])) throw new RuntimeException('A selected schedule could not be deleted.');
+            }
+            foreach (array_keys($deviceIds) as $deviceId) $this->bumpDeviceRevision((int) $deviceId);
+            $this->finishTransaction();
+        } catch (Throwable $error) {
+            $this->db->transRollback();
+            throw $error;
+        }
+        return ['changed' => count($rows), 'devices' => count($deviceIds)];
     }
 
     /** @return array{revision:int,schedules:list<array<string,mixed>>} */
@@ -525,9 +584,77 @@ class ScheduleService
     private function targetsForSchedule(int $scheduleId): array
     {
         return $this->db->table('schedule_targets st')
-            ->select('d.id AS device_id, d.public_id, d.name, d.location, d.location_id')
+            ->select('d.id AS device_id, d.public_id, d.name, d.location, d.location_id, l.public_id AS location_public_id, l.name AS location_name')
             ->join('devices d', 'd.id = st.device_id')
+            ->join('locations l', 'l.id = d.location_id', 'left')
             ->where('st.schedule_id', $scheduleId)->orderBy('d.location')->orderBy('d.name')->get()->getResultArray();
+    }
+
+    /** @param array<string, mixed> $row @return array<string, mixed> */
+    private function hydrateForWeb(array $row): array
+    {
+        $row['targets'] = $this->targetsForSchedule((int) $row['id']);
+        foreach ($row['targets'] as &$target) {
+            $target['location'] = (string) ($target['location_name'] ?: $target['location']);
+        }
+        unset($target);
+        $first = $row['targets'][0] ?? null;
+        $row['device_public_id'] = $first['public_id'] ?? null;
+        $row['device_name'] = $first['name'] ?? 'No target';
+        $row['device_location'] = $first['location'] ?? null;
+        $row['target_count'] = count($row['targets']);
+        $row['location_count'] = count(array_unique(array_filter(array_column($row['targets'], 'location'))));
+        $timeline = $this->timeline->calculate($this->itemsForSchedule((int) $row['id']), (bool) $row['loop_enabled']);
+        $row['items'] = $timeline['items'];
+        $row['timeline'] = $timeline;
+        $row['display_status'] = $this->displayStatus($row);
+        return $row;
+    }
+
+    /** @param list<array<string, mixed>> $rows @return array{locations:list<array<string,mixed>>,assets:list<array<string,mixed>>} */
+    private function directoryOptions(array $rows): array
+    {
+        $locations = [];
+        $assets = [];
+        foreach ($rows as $row) {
+            $locationIds = [];
+            $deviceIds = [];
+            foreach ((array) $row['targets'] as $target) {
+                $deviceId = (string) ($target['public_id'] ?? '');
+                $locationId = (string) ($target['location_public_id'] ?? '');
+                if ($deviceId !== '') $deviceIds[] = $deviceId;
+                if ($locationId === '') $locationId = 'legacy:' . sha1((string) ($target['location'] ?? 'No Location'));
+                $locationIds[] = $locationId;
+                $locations[$locationId] ??= ['id' => $locationId, 'name' => (string) ($target['location'] ?? 'No Location'), 'studios' => []];
+                if ($deviceId !== '') $locations[$locationId]['studios'][$deviceId] = ['id' => $deviceId, 'name' => (string) ($target['name'] ?? 'Studio')];
+            }
+            foreach ((array) $row['items'] as $item) {
+                $assetId = (string) ($item['asset_public_id'] ?? '');
+                if ($assetId === '') continue;
+                $assets[$assetId] ??= ['id' => $assetId, 'title' => (string) ($item['title_snapshot'] ?? 'Untitled'), 'location_ids' => [], 'device_ids' => []];
+                $assets[$assetId]['location_ids'] = array_values(array_unique([...$assets[$assetId]['location_ids'], ...$locationIds]));
+                $assets[$assetId]['device_ids'] = array_values(array_unique([...$assets[$assetId]['device_ids'], ...$deviceIds]));
+            }
+        }
+        foreach ($locations as &$location) {
+            $location['studios'] = array_values($location['studios']);
+            usort($location['studios'], static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        }
+        unset($location);
+        usort($locations, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        usort($assets, static fn (array $a, array $b): int => strcasecmp($a['title'], $b['title']));
+        return ['locations' => array_values($locations), 'assets' => array_values($assets)];
+    }
+
+    /** @param list<string> $publicIds @return list<array<string, mixed>> */
+    private function bulkSchedules(array $publicIds): array
+    {
+        $publicIds = array_values(array_unique(array_filter(array_map(static fn ($id): string => trim((string) $id), $publicIds))));
+        if ($publicIds === []) throw new ScheduleValidationException(['schedules' => 'Choose at least one schedule.']);
+        if (count($publicIds) > 100) throw new ScheduleValidationException(['schedules' => 'Choose at most 100 schedules at once.']);
+        $rows = $this->db->table('schedules')->whereIn('public_id', $publicIds)->get()->getResultArray();
+        if (count($rows) !== count($publicIds)) throw new ScheduleValidationException(['schedules' => 'One or more selected schedules no longer exist. Refresh and try again.']);
+        return $rows;
     }
 
     /** @param array<string, mixed> $schedule */

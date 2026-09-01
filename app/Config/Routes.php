@@ -64,6 +64,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
     $routes->post('schedules/(:segment)/status', 'Web\ScheduleController::status/$1');
     $routes->post('schedules/(:segment)/delete', 'Web\ScheduleController::delete/$1');
+    $routes->post('schedules/bulk-disable', 'Web\ScheduleController::bulkDisable');
+    $routes->post('schedules/bulk-delete', 'Web\ScheduleController::bulkDelete');
 });
 $routes->group('control', ['filter' => 'web-assets'], static function (RouteCollection $routes): void {
     $routes->get('assets', 'Web\AssetController::index');
