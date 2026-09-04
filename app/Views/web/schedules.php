@@ -333,7 +333,7 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     playlist = playlist.filter(item => available.has(item.mediaKey));
     playlist.forEach((entry, index) => {
       const media = available.get(entry.mediaKey); const row = document.createElement('div'); row.className = 'playlist-row'; row.dataset.timelineIndex = String(index);
-      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong data-playlist-title></strong><small class="playlist-duration" data-playlist-duration></small><small class="playlist-file" data-playlist-file></small></span><fieldset class="film-volume"><legend>Film volume</legend><label><input data-volume-range type="range" min="0" max="100" step="1"><output data-volume-output>100%</output></label></fieldset><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><div class="playlist-item-timeline"><span class="timeline-clock" data-start-clock><small>STARTS AT</small><strong data-timeline-start>—</strong><input data-timeline-start-input type="datetime-local" step="1" hidden><em data-start-note></em><b class="timeline-clock-error" data-start-error></b></span><span class="timeline-clock"><small>CONTENT ENDS</small><strong data-timeline-end>—</strong><em data-played-duration>Calculated from film duration</em></span><span class="timeline-clock" data-boundary-clock><small data-timeline-next-label>TIMELINE ENDS</small><strong data-timeline-next>—</strong><div class="timeline-boundary-controls"><input data-timeline-boundary-input type="datetime-local" step="1" hidden><button data-action="reset-gap" class="btn ghost" type="button" hidden>Reset</button></div><em data-timeline-status></em><b class="timeline-clock-error" data-boundary-error></b></span></div><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="playback_start_offset_ms[]"><input type="hidden" name="gap_after_ms[]"><input type="hidden" name="volume_percent[]">`;
+      row.innerHTML = `<span class="playlist-order">${index + 1}</span><span class="playlist-name"><strong data-playlist-title></strong><small class="playlist-duration" data-playlist-duration></small><small class="playlist-file" data-playlist-file></small></span><div class="playlist-compact-timeline"><span><small>STARTS</small><strong data-timeline-start>—</strong></span><b aria-hidden="true">→</b><span><small>ENDS</small><strong data-timeline-end>—</strong><em data-played-duration></em></span><b aria-hidden="true">→</b><span><small data-timeline-next-label>NEXT</small><strong data-timeline-next>—</strong><em data-timeline-status></em></span></div><label class="compact-volume"><span>Vol</span><input data-volume-input type="number" min="0" max="100" step="1" inputmode="numeric" aria-label="Film volume percentage"><b>%</b></label><span class="playlist-controls"><button type="button" class="btn ghost" data-action="up" aria-label="Move film up">↑</button><button type="button" class="btn ghost" data-action="down" aria-label="Move film down">↓</button><button type="button" class="btn danger" data-action="remove" aria-label="Remove film">×</button></span><details class="playlist-advanced"><summary>Advanced timing</summary><div class="playlist-advanced-fields"><label data-manual-start-wrap hidden>Start this film<input data-timeline-start-input type="datetime-local" step="1" hidden><small data-start-note></small><b class="timeline-clock-error" data-start-error></b></label><label data-boundary-wrap hidden>Next boundary<div class="timeline-boundary-controls"><input data-timeline-boundary-input type="datetime-local" step="1" hidden><button data-action="reset-gap" class="btn ghost" type="button" hidden>Use default</button></div><b class="timeline-clock-error" data-boundary-error></b></label></div></details><input type="hidden" name="media_keys[]"><input type="hidden" name="duration_ms[]"><input type="hidden" name="playback_start_offset_ms[]"><input type="hidden" name="gap_after_ms[]"><input type="hidden" name="volume_percent[]">`;
       const sourceDurationMs = Math.max(0, Number(media.durationMs) || 0);
       const fullFilename = mediaFilename(media);
       row.querySelector('[data-playlist-title]').textContent = media.title;
@@ -350,31 +350,31 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
       durationHidden.value = String(sourceDurationMs);
       playbackStartOffsetHidden.value = '0';
       gapHidden.value = String(Math.max(0, Number(entry.gapAfterMs) || 0));
-      const volumeRange = row.querySelector('[data-volume-range]');
-      const volumeOutput = row.querySelector('[data-volume-output]');
-      const syncVolume = () => { const value = Math.max(0, Math.min(100, Math.round(Number(volumeRange.value) || 0))); entry.volumePercent = value; volumeHidden.value = String(value); volumeOutput.value = `${value}%`; volumeOutput.textContent = `${value}%`; };
-      volumeRange.value = String(Number.isFinite(Number(entry.volumePercent)) ? entry.volumePercent : 100);
-      volumeRange.addEventListener('input', syncVolume);
+      const volumeInput = row.querySelector('[data-volume-input]');
+      const syncVolume = () => { const value = Math.max(0, Math.min(100, Math.round(Number(volumeInput.value) || 0))); entry.volumePercent = value; volumeHidden.value = String(value); };
+      volumeInput.value = String(Number.isFinite(Number(entry.volumePercent)) ? entry.volumePercent : 100);
+      volumeInput.addEventListener('input', syncVolume);
+      volumeInput.addEventListener('change', () => { syncVolume(); volumeInput.value = String(entry.volumePercent); });
       syncVolume();
       const gapActive = index < playlist.length - 1 || loopInput?.checked;
+      const advanced = row.querySelector('.playlist-advanced');
       const manualStart = row.querySelector('[data-timeline-start-input]');
       const boundaryInput = row.querySelector('[data-timeline-boundary-input]');
       const resetGap = row.querySelector('[data-action=reset-gap]');
       if (index > 0) {
-        row.querySelector('[data-timeline-start]').hidden = true;
+        row.querySelector('[data-manual-start-wrap]').hidden = false;
         manualStart.hidden = false;
         row.querySelector('[data-start-note]').textContent = 'Adjusts the previous film gap';
         manualStart.addEventListener('change', () => applyBoundary(index - 1, manualStart, row.querySelector('[data-start-error]')));
-      } else {
-        row.querySelector('[data-start-note]').textContent = 'Locked to schedule start';
       }
       if (gapActive) {
-        row.querySelector('[data-timeline-next]').hidden = true;
+        row.querySelector('[data-boundary-wrap]').hidden = false;
         boundaryInput.hidden = false;
         resetGap.hidden = false;
         boundaryInput.addEventListener('change', () => applyBoundary(index, boundaryInput, row.querySelector('[data-boundary-error]')));
         resetGap.onclick = () => { entry.gapAfterMs = defaultGapMs; entry.gapOverridden = false; render(); };
       }
+      advanced.hidden = index === 0;
       for (const input of [manualStart, boundaryInput]) input.addEventListener('input', () => {
         input.classList.remove('invalid');
       });
@@ -477,10 +477,10 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
         if (!manualStart.hidden) { manualStart.value = startValue === null ? '' : formatMomentInput(startValue); manualStart.disabled = startValue === null; }
         if (!boundaryInput.hidden) { boundaryInput.value = boundaryValue === null ? '' : formatMomentInput(boundaryValue); boundaryInput.disabled = boundaryValue === null; }
         const status = row.querySelector('[data-timeline-status]');
-        status.textContent = item.gap > 0 ? `Adjusted · ${duration(item.gap)} gap` : (index === playlist.length - 1 && !timeline.loop ? 'Ends with the film' : 'Automatic · no gap');
-        status.classList.toggle('adjusted', item.gap > 0);
+        status.textContent = item.gap > 0 ? `${playlist[index]?.gapOverridden ? 'Custom' : 'Default'} · ${duration(item.gap)} gap` : (index === playlist.length - 1 && !timeline.loop ? 'Ends with the film' : 'Automatic · no gap');
+        status.classList.toggle('adjusted', Boolean(playlist[index]?.gapOverridden));
         const reset = row.querySelector('[data-action=reset-gap]');
-        if (reset) reset.hidden = item.gap <= 0;
+        if (reset) reset.hidden = !playlist[index]?.gapOverridden;
         row.querySelector('[data-played-duration]').textContent = `Plays ${duration(item.filmDuration)}`;
       }
     });

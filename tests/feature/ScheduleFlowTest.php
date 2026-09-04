@@ -39,6 +39,9 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertStringContainsString('id="defaultGapFields"', $page->response()->getBody());
         $this->assertStringContainsString('playlist-gap-divider', $page->response()->getBody());
         $this->assertStringNotContainsString('data-time="gap"', $page->response()->getBody());
+        $this->assertStringContainsString('playlist-compact-timeline', $page->response()->getBody());
+        $this->assertStringContainsString('data-volume-input', $page->response()->getBody());
+        $this->assertStringNotContainsString('data-volume-range', $page->response()->getBody());
 
         $created = $this->postForm('/control/schedules', [
             'title' => 'Jakarta Morning Playlist', 'device_id' => $fixture['device']->public_id,
