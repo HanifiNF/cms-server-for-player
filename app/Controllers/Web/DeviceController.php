@@ -4,12 +4,15 @@ namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
 use App\Libraries\DeviceEnrollmentService;
+use App\Libraries\CollectionPage;
 use App\Libraries\LocationService;
 use App\Models\DeviceModel;
 use App\Models\DeviceAssetModel;
 use App\Models\UserModel;
 use App\Models\LocationModel;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
+use Config\Database;
 use Config\Player;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -27,42 +30,56 @@ class DeviceController extends BaseController
         $device = (new DeviceModel())->where('public_id', $publicId)->first();
         if ($device === null) return redirect()->to('/control/devices')->with('error', 'Studio was not found.');
 
-        $query = mb_strtolower(trim((string) $this->request->getGet('q')));
-        $status = trim((string) $this->request->getGet('status'));
-        $source = trim((string) $this->request->getGet('source'));
-        if (! in_array($status, ['', 'ready', 'missing', 'corrupt', 'unreadable'], true)) $status = '';
-        if (! in_array($source, ['', 'local', 'managed'], true)) $source = '';
+        $totals = Database::connect()->table('device_assets')
+            ->select('COUNT(*) AS total', false)
+            ->select("SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready", false)
+            ->select("SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END) AS missing", false)
+            ->select("SUM(CASE WHEN status <> 'ready' THEN 1 ELSE 0 END) AS problems", false)
+            ->select('MAX(last_reported_at) AS last_synced_at', false)
+            ->where('device_id', $device->id)->get()->getRowArray() ?? [];
+        $summary = [
+            'total' => (int) ($totals['total'] ?? 0), 'ready' => (int) ($totals['ready'] ?? 0),
+            'missing' => (int) ($totals['missing'] ?? 0), 'problems' => (int) ($totals['problems'] ?? 0),
+        ];
+        $lastSyncedAt = empty($totals['last_synced_at']) ? null : new DateTimeImmutable((string) $totals['last_synced_at']);
 
-        $allAssets = (new DeviceAssetModel())->where('device_id', $device->id)->findAll();
-        $summary = ['total' => 0, 'ready' => 0, 'missing' => 0, 'problems' => 0];
-        $lastSyncedAt = null;
-        foreach ($allAssets as $asset) {
-            $summary['total']++;
-            if ($asset->status === 'ready') $summary['ready']++;
-            else $summary['problems']++;
-            if ($asset->status === 'missing') $summary['missing']++;
-            if ($asset->last_reported_at !== null && ($lastSyncedAt === null || $asset->last_reported_at->getTimestamp() > $lastSyncedAt->getTimestamp())) {
-                $lastSyncedAt = $asset->last_reported_at;
-            }
-        }
-
-        $assets = array_values(array_filter($allAssets, static function ($asset) use ($query, $status, $source): bool {
-            if ($status !== '' && $asset->status !== $status) return false;
-            if ($source !== '' && $asset->source !== $source) return false;
-            if ($query === '') return true;
-            $haystack = mb_strtolower(implode(' ', [$asset->title, $asset->filename, $asset->relative_path, $asset->media_key]));
-            return str_contains($haystack, $query);
-        }));
-        usort($assets, static fn ($left, $right): int => strcasecmp($left->title, $right->title) ?: strcasecmp($left->relative_path ?? '', $right->relative_path ?? ''));
+        $filters = $this->assetFilters();
+        $resultCount = (clone $this->filteredAssets((int) $device->id, $filters))->countAllResults();
 
         return view('web/device_assets', [
             'title' => 'Studio Assets', 'active' => 'locations', 'admin' => $this->admin(),
-            'device' => $device, 'assets' => array_slice($assets, 0, 1000),
+            'device' => $device, 'assets' => [],
             'locationPublicId' => $device->location_id === null ? null : (new LocationModel())->find((int) $device->location_id)?->public_id,
             'summary' => $summary, 'lastSyncedAt' => $lastSyncedAt,
-            'filters' => ['q' => (string) $this->request->getGet('q'), 'status' => $status, 'source' => $source],
-            'resultCount' => count($assets),
+            'filters' => $filters, 'resultCount' => $resultCount,
         ]);
+    }
+
+    public function assetCollection(string $publicId): ResponseInterface
+    {
+        $device = (new DeviceModel())->where('public_id', $publicId)->first();
+        if ($device === null) return $this->response->setStatusCode(404)->setJSON(['error' => ['message' => 'Studio was not found.']]);
+        $filters = $this->assetFilters();
+        $total = $this->filteredAssets((int) $device->id, $filters)->countAllResults();
+        $page = CollectionPage::fromQuery((array) $this->request->getGet(), $total, 50, 100);
+        $query = $this->filteredAssets((int) $device->id, $filters);
+        $assets = $query->orderBy('title')->orderBy('relative_path')->findAll($page->perPage(), $page->offset());
+        $formatBytes = static function (int $bytes): string {
+            if ($bytes <= 0) return '0 B';
+            $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            $power = min((int) floor(log($bytes, 1024)), count($units) - 1);
+            return number_format($bytes / (1024 ** $power), $power >= 3 ? 1 : 0) . ' ' . $units[$power];
+        };
+        $formatDuration = static function (int $milliseconds): string {
+            if ($milliseconds <= 0) return 'Unknown';
+            $seconds = (int) floor($milliseconds / 1000);
+            return sprintf('%02d:%02d:%02d', intdiv($seconds, 3600), intdiv($seconds % 3600, 60), $seconds % 60);
+        };
+        $items = array_map(static fn (object $asset): array => [
+            'id' => (int) $asset->id,
+            'html' => view('web/_device_asset_row', ['asset' => $asset, 'formatBytes' => $formatBytes, 'formatDuration' => $formatDuration]),
+        ], $assets);
+        return $this->response->setJSON(['data' => $page->payload($items)]);
     }
 
     public function create(): RedirectResponse
@@ -160,6 +177,26 @@ class DeviceController extends BaseController
     private function validOperator(int $id): bool
     {
         return (new UserModel())->where('id', $id)->where('role', 'operator')->where('status', 'active')->first() !== null;
+    }
+
+    /** @return array{q:string,status:string,source:string} */
+    private function assetFilters(): array
+    {
+        $status = trim((string) $this->request->getGet('status'));
+        $source = trim((string) $this->request->getGet('source'));
+        if (! in_array($status, ['', 'ready', 'missing', 'corrupt', 'unreadable'], true)) $status = '';
+        if (! in_array($source, ['', 'local', 'managed'], true)) $source = '';
+        return ['q' => mb_substr(trim((string) $this->request->getGet('q')), 0, 120), 'status' => $status, 'source' => $source];
+    }
+
+    /** @param array{q:string,status:string,source:string} $filters */
+    private function filteredAssets(int $deviceId, array $filters): DeviceAssetModel
+    {
+        $query = (new DeviceAssetModel())->where('device_id', $deviceId);
+        if ($filters['status'] !== '') $query->where('status', $filters['status']);
+        if ($filters['source'] !== '') $query->where('source', $filters['source']);
+        if ($filters['q'] !== '') $query->groupStart()->like('title', $filters['q'])->orLike('filename', $filters['q'])->orLike('relative_path', $filters['q'])->orLike('media_key', $filters['q'])->groupEnd();
+        return $query;
     }
 
     private function admin(): object

@@ -58,6 +58,8 @@ final class WebControlPanelTest extends CIUnitTestCase
         $catalogPage->assertSee('No matching media');
         $catalogPage->assertSee('Preparing upload');
         $catalogPage->assertSee('Cancel upload');
+        $this->assertStringContainsString('assets/cms-async.css', $catalogPage->getBody());
+        $this->assertStringContainsString('assets/cms-async.js', $catalogPage->getBody());
         $legacyAssetsPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/assets');
         $legacyAssetsPage->assertRedirectTo('/control/library');
 
@@ -78,10 +80,11 @@ final class WebControlPanelTest extends CIUnitTestCase
         $operatorResponse->assertRedirectTo('/control/operators');
         $operator = (new UserModel())->where('email', 'lobby-operator@example.com')->first();
         $this->assertNotNull($operator);
-        $accountSearch = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/operators?q=Lobby&role=operator&status=active');
+        $accountSearch = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/operators/collection?q=Lobby&role=operator&status=active');
         $accountSearch->assertOK();
         $accountSearch->assertSee('Lobby Operator');
-        $accountSearch->assertSee('1 accounts');
+        $accountPayload = json_decode($accountSearch->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(1, (int) $accountPayload['data']['pagination']['total']);
 
         $locationResponse = $this->withSession(['cms_web_user_id' => $adminId])->postForm('/control/locations', [
             'name' => 'Lobby lantai 1', 'code' => 'LBY1', 'address' => '', 'timezone' => 'Asia/Jakarta',
@@ -100,7 +103,7 @@ final class WebControlPanelTest extends CIUnitTestCase
         $this->assertSame('pending', $device->status);
         $this->assertSame((int) $operator->id, (int) $device->assigned_user_id);
 
-        $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id);
+        $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id . '/studios/collection');
         $page->assertOK();
         $page->assertSee('Player Lobby');
         $page->assertSee('Lobby Operator');
@@ -174,7 +177,7 @@ final class WebControlPanelTest extends CIUnitTestCase
             'duration_ms' => 90000, 'status' => 'ready', 'last_reported_at' => '2026-08-06 04:00:00',
         ]);
         $assetPage = $this->withSession(['cms_web_user_id' => $adminId])
-            ->get('/control/devices/' . $device->public_id . '/assets?q=Promo&status=ready&source=local');
+            ->get('/control/devices/' . $device->public_id . '/assets/collection?q=Promo&status=ready&source=local');
         $assetPage->assertOK();
         $assetPage->assertSee('Promo Jakarta');
         $assetPage->assertSee('Campaign/Promo Jakarta.mp4');
@@ -188,7 +191,7 @@ final class WebControlPanelTest extends CIUnitTestCase
         $this->assertNull($revokedDevice->device_key_hash);
         $this->assertNull($revokedDevice->fingerprint_hash);
 
-        $revokedPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id);
+        $revokedPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id . '/studios/collection?studio_status=revoked');
         $revokedPage->assertOK();
         $revokedPage->assertSee('REVOKED');
         $revokedPage->assertSee('Delete');

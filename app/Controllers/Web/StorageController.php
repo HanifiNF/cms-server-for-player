@@ -19,9 +19,12 @@ class StorageController extends BaseController
     public function index(): string
     {
         $profiles = [];
-        $db = Database::connect();
         $manager = new StorageManager();
-        foreach ((new StorageProfileModel())->orderBy('is_default', 'DESC')->orderBy('name')->findAll() as $profile) {
+        $entities = (new StorageProfileModel())->orderBy('is_default', 'DESC')->orderBy('name')->findAll();
+        $profileIds = array_map(static fn (object $profile): int => (int) $profile->id, $entities);
+        $assetCounts = $this->storageReferenceCounts('assets', $profileIds);
+        $versionCounts = $this->storageReferenceCounts('asset_versions', $profileIds);
+        foreach ($entities as $profile) {
             try { $location = $manager->displayLocation($profile); }
             catch (Throwable $error) { $location = 'Unavailable: ' . $error->getMessage(); }
             $credentialUsername = '';
@@ -31,8 +34,8 @@ class StorageController extends BaseController
             }
             $profiles[] = [
                 'entity' => $profile,
-                'assetCount' => $db->table('assets')->where('storage_profile_id', $profile->id)->countAllResults(),
-                'versionCount' => $db->table('asset_versions')->where('storage_profile_id', $profile->id)->countAllResults(),
+                'assetCount' => $assetCounts[(int) $profile->id] ?? 0,
+                'versionCount' => $versionCounts[(int) $profile->id] ?? 0,
                 'location' => $location,
                 'config' => is_array($decoded = json_decode((string) $profile->config, true)) ? $decoded : [],
                 'credentialUsername' => $credentialUsername,
@@ -161,6 +164,17 @@ class StorageController extends BaseController
 
     private function backWithError(string $message): RedirectResponse { return redirect()->to('/control/storage')->with('error', $message); }
     private function admin(): object { return (new UserModel())->find((int) session()->get('cms_web_user_id')); }
+
+    /** @param list<int> $profileIds @return array<int,int> */
+    private function storageReferenceCounts(string $table, array $profileIds): array
+    {
+        if ($profileIds === []) return [];
+        $rows = Database::connect()->table($table)->select('storage_profile_id, COUNT(*) AS reference_count', false)
+            ->whereIn('storage_profile_id', $profileIds)->groupBy('storage_profile_id')->get()->getResultArray();
+        $counts = [];
+        foreach ($rows as $row) $counts[(int) $row['storage_profile_id']] = (int) $row['reference_count'];
+        return $counts;
+    }
 
     private function uuidV4(): string
     {

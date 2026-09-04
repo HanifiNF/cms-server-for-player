@@ -44,18 +44,12 @@ foreach ($devices as $device) {
 $scheduleDirectory ??= ['all' => $schedules, 'filters' => [], 'options' => ['locations' => [], 'assets' => []], 'total' => count($schedules), 'total_all' => count($schedules), 'page' => 1, 'pages' => 1];
 $directoryFilters = $scheduleDirectory['filters'];
 $directoryOptions = $scheduleDirectory['options'];
-$filteredSchedules = $scheduleDirectory['all'];
 $directoryQuery = http_build_query(array_filter($directoryFilters, static fn ($value): bool => $value !== null && $value !== '' && $value !== []));
-$pageQuery = static function (int $page) use ($directoryFilters): string {
-    $values = $directoryFilters;
-    $values['page'] = $page;
-    return http_build_query(array_filter($values, static fn ($value): bool => $value !== null && $value !== '' && $value !== []));
-};
 $selectedLocations = (array) ($directoryFilters['location_ids'] ?? []);
 $selectedStudios = (array) ($directoryFilters['device_ids'] ?? []);
 $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
 ?>
-<div class="cms-page-toolbar"><div><p>DELIVERY PLAN</p><h2>Playback schedules</h2><span>Create one-time, daily, or weekly playlists for one or more Studios.</span></div><div class="cms-toolbar-actions"><span class="count"><?= (int) $scheduleDirectory['total'] ?> of <?= (int) $scheduleDirectory['total_all'] ?> Schedules</span><button class="btn ghost" type="button" data-cms-modal-open="bulk-disable-schedules" <?= $filteredSchedules === [] ? 'disabled' : '' ?>>Disable Schedules</button><button class="btn danger" type="button" data-cms-modal-open="bulk-delete-schedules" <?= $filteredSchedules === [] ? 'disabled' : '' ?>>Delete Schedules</button><button class="btn primary" type="button" data-cms-modal-open="schedule-editor-modal" <?= $devices === [] ? 'disabled title="Pair an active Studio first"' : '' ?>>+ Create Schedule</button></div></div>
+<div class="cms-page-toolbar"><div><p>DELIVERY PLAN</p><h2>Playback schedules</h2><span>Create one-time, daily, or weekly playlists for one or more Studios.</span></div><div class="cms-toolbar-actions"><span class="count" data-schedule-result-count>Loading Schedules…</span><button class="btn ghost" type="button" data-schedule-bulk-open data-cms-modal-open="bulk-disable-schedules" disabled>Disable Schedules</button><button class="btn danger" type="button" data-schedule-bulk-open data-cms-modal-open="bulk-delete-schedules" disabled>Delete Schedules</button><button class="btn primary" type="button" data-cms-modal-open="schedule-editor-modal" <?= $devices === [] ? 'disabled title="Pair an active Studio first"' : '' ?>>+ Create Schedule</button></div></div>
 <?php if ($devices === []): ?><div class="alert error">Create and pair an active Studio before adding schedules.</div><?php endif ?>
 
 <form class="schedule-directory-filter" method="get" action="<?= site_url('control/schedules') ?>" id="scheduleDirectoryFilter">
@@ -128,15 +122,8 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     <header class="cms-modal-header"><div><p>BULK SCHEDULE MANAGEMENT</p><h2><?= esc($bulk['title']) ?></h2><span>The active directory filters are already applied. Select up to 100 schedules.</span></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header>
     <div class="cms-modal-body">
       <div class="cms-confirm-message <?= $bulkMode === 'delete' ? 'danger' : '' ?>"><strong><?= esc($bulk['message']) ?></strong>One device revision and realtime notification is produced per affected Studio.</div>
-      <div class="schedule-bulk-tools"><input type="search" data-bulk-schedule-search placeholder="Search within these <?= (int) $scheduleDirectory['total'] ?> results"><label><input type="checkbox" data-bulk-select-visible> Select visible</label><strong data-bulk-selection-count>0 selected</strong></div>
-      <div class="schedule-bulk-list">
-        <?php foreach ($filteredSchedules as $schedule):
-          $bulkText = mb_strtolower($schedule['title'] . ' ' . implode(' ', array_column($schedule['targets'], 'name')) . ' ' . implode(' ', array_column($schedule['targets'], 'location')) . ' ' . implode(' ', array_column($schedule['items'], 'title_snapshot')) . ' ' . $schedule['display_status']);
-          $cannotDisable = $bulkMode === 'disable' && $schedule['status'] === 'disabled';
-        ?>
-        <label data-bulk-schedule-row data-search-text="<?= esc($bulkText, 'attr') ?>" class="<?= $cannotDisable ? 'disabled' : '' ?>"><input type="checkbox" name="schedule_ids[]" value="<?= esc($schedule['public_id'], 'attr') ?>" data-bulk-schedule-check <?= $cannotDisable ? 'disabled' : '' ?>><span><strong><?= esc($schedule['title']) ?></strong><small><?= esc(implode(', ', array_column($schedule['targets'], 'name'))) ?> · <?= esc(strtoupper($schedule['display_status'])) ?> · <?= count($schedule['items']) ?> asset(s)</small></span></label>
-        <?php endforeach ?>
-      </div>
+      <div class="schedule-bulk-tools"><input type="search" data-bulk-schedule-search placeholder="Search within this page"><label><input type="checkbox" data-bulk-select-visible> Select visible</label><strong data-bulk-selection-count>0 selected</strong></div>
+      <div class="schedule-bulk-list" data-bulk-schedule-list></div>
     </div>
     <footer class="cms-modal-footer"><span>Only explicitly selected schedules are changed.</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $bulkMode === 'delete' ? 'danger' : 'primary' ?>" type="submit" data-bulk-submit disabled><?= esc($bulk['button']) ?></button></div></footer>
   </form>
@@ -144,46 +131,12 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
 <?php endforeach ?>
 
 <section class="schedule-list">
-  <div class="section-heading"><div><p>SCHEDULE DIRECTORY</p><h2>Matching schedules</h2></div><span class="badge"><?= (int) $scheduleDirectory['total'] ?> results</span></div>
-  <?php if ($schedules === []): ?><article class="card empty">No schedule matches these filters. Reset the filters or create a new schedule.</article><?php endif ?>
-  <?php foreach ($schedules as $schedule):
-    $tz = new DateTimeZone($schedule['timezone']);
-    $start = (new DateTimeImmutable($schedule['start_at'], new DateTimeZone('UTC')))->setTimezone($tz);
-    $end = (new DateTimeImmutable($schedule['end_at'], new DateTimeZone('UTC')))->setTimezone($tz);
-    $recurrenceConfig = is_array($schedule['recurrence_config']) ? $schedule['recurrence_config'] : json_decode((string) ($schedule['recurrence_config'] ?? ''), true);
-    $recurrenceConfig = is_array($recurrenceConfig) ? $recurrenceConfig : [];
-    $repeatLabel = match ($schedule['recurrence']) {
-      'daily' => 'Daily',
-      'weekly' => 'Weekly · ' . implode(', ', array_map(static fn ($day) => [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'][(int) $day] ?? '', $recurrenceConfig['daysOfWeek'] ?? [])),
-      default => 'One time',
-    };
-    if ($schedule['recurrence'] !== 'one_time') $repeatLabel .= !empty($recurrenceConfig['until']) ? ' · until ' . $recurrenceConfig['until'] : ' · no end date';
-  ?>
-    <article class="card schedule-card">
-      <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><div class="schedule-card-head-tools"><div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div></div>
-      <?php if ((int) $schedule['target_count'] > 1): ?><details class="schedule-card-targets"><summary>View <?= (int) $schedule['target_count'] ?> target Studios <span>⌄</span></summary><div><?php foreach ($schedule['targets'] as $target): ?><span><strong><?= esc($target['name']) ?></strong><small><?= esc($target['location'] ?: 'No Location') ?></small></span><?php endforeach ?></div></details><?php endif ?>
-      <div class="schedule-meta schedule-meta-detailed"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i:s')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i:s')) ?></span><span><small>FILM DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['film_duration_ms'])) ?></span><span><small>TOTAL GAP</small><?= esc($formatDuration((int) $schedule['timeline']['gap_duration_ms'])) ?></span><span><small>TOTAL DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['total_duration_ms'])) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span></div>
-      <section class="schedule-assets-collapse" data-schedule-assets>
-      <button class="schedule-assets-toggle" type="button" aria-expanded="false" aria-controls="schedule-assets-<?= esc($schedule['public_id'], 'attr') ?>"><span aria-hidden="true"></span><b aria-hidden="true">⌄</b><span aria-hidden="true"></span><i class="sr-only">Show <?= count($schedule['items']) ?> schedule assets</i></button>
-      <div class="schedule-assets-content" id="schedule-assets-<?= esc($schedule['public_id'], 'attr') ?>" aria-hidden="true"><div class="schedule-assets-inner"><ol class="schedule-items schedule-timeline-items">
-        <?php foreach ($schedule['items'] as $item):
-          $itemStart = $start->modify('+' . (int) $item['start_offset_ms'] . ' milliseconds');
-          $contentEnd = $start->modify('+' . (int) $item['content_end_offset_ms'] . ' milliseconds');
-          $nextStart = $start->modify('+' . (int) $item['next_start_offset_ms'] . ' milliseconds');
-          $effectiveGap = (int) $item['effective_gap_after_ms'];
-        ?>
-          <li>
-            <div class="schedule-item-title"><span><?= esc($item['title_snapshot']) ?></span><small>Source <?= esc($formatDuration((int) $item['duration_override_ms'])) ?><?= (int) $item['playback_start_offset_ms'] > 0 ? ' · Starts from ' . esc($formatDuration((int) $item['playback_start_offset_ms'])) : '' ?> · Plays <?= esc($formatDuration((int) $item['effective_duration_ms'])) ?><?= $effectiveGap > 0 ? ' · Gap ' . esc($formatDuration($effectiveGap)) : '' ?> · Volume <?= (int) ($item['volume_percent'] ?? 100) ?>%</small></div>
-            <div class="schedule-item-times"><span><small>STARTS AT</small><?= esc($itemStart->format('Y-m-d H:i:s')) ?></span><span><small>CONTENT ENDS</small><?= esc($contentEnd->format('Y-m-d H:i:s')) ?></span><span><small><?= $effectiveGap > 0 ? 'NEXT START' : 'TIMELINE END' ?></small><?= esc(($effectiveGap > 0 ? $nextStart : $contentEnd)->format('Y-m-d H:i:s')) ?></span></div>
-          </li>
-        <?php endforeach ?>
-      </ol></div></div>
-      </section>
-    </article>
-    <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
-    <dialog class="cms-action-modal" id="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/delete') ?>" class="cms-modal-shell"><?= csrf_field() ?><header class="cms-modal-header"><div><p>DANGER ZONE</p><h2>Delete <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message danger"><strong>This schedule will be permanently removed.</strong>All target Players remove it from their local schedule cache on the next refresh.</div></div><footer class="cms-modal-footer"><span>Permanent deletion</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn danger" type="submit">Delete Schedule</button></div></footer></form></dialog>
-  <?php endforeach ?>
-  <?php if ((int) $scheduleDirectory['pages'] > 1): ?><nav class="schedule-pagination" aria-label="Schedule directory pages"><?php if ((int) $scheduleDirectory['page'] > 1): ?><a class="page-move" href="<?= site_url('control/schedules') . '?' . esc($pageQuery((int) $scheduleDirectory['page'] - 1), 'attr') ?>">← Previous</a><?php endif ?><?php for ($page = 1; $page <= (int) $scheduleDirectory['pages']; $page++): ?><a class="<?= $page === (int) $scheduleDirectory['page'] ? 'active' : '' ?>" href="<?= site_url('control/schedules') . '?' . esc($pageQuery($page), 'attr') ?>" <?= $page === (int) $scheduleDirectory['page'] ? 'aria-current="page"' : '' ?>><?= $page ?></a><?php endfor ?><?php if ((int) $scheduleDirectory['page'] < (int) $scheduleDirectory['pages']): ?><a class="page-move" href="<?= site_url('control/schedules') . '?' . esc($pageQuery((int) $scheduleDirectory['page'] + 1), 'attr') ?>">Next →</a><?php endif ?></nav><?php endif ?>
+  <div class="section-heading"><div><p>SCHEDULE DIRECTORY</p><h2>Matching schedules</h2></div><span class="badge" data-schedule-match-count>Loading…</span></div>
+  <div data-schedule-collection data-endpoint="<?= site_url('control/schedules/collection') ?>">
+    <div data-cms-async-items></div>
+    <nav data-cms-async-pagination aria-label="Schedule directory pages"></nav>
+  </div>
+  <noscript><article class="card empty">Enable JavaScript to load the paginated schedule directory.</article></noscript>
 </section>
 <script>
 (() => {
@@ -597,44 +550,160 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     refreshAssets();
   }
 
-  for (const section of document.querySelectorAll('[data-schedule-assets]')) {
-    const toggle = section.querySelector('.schedule-assets-toggle');
-    const content = section.querySelector('.schedule-assets-content');
+  document.addEventListener('click', event => {
+    const toggle = event.target.closest('.schedule-assets-toggle');
+    if (!toggle) return;
+    const section = toggle.closest('[data-schedule-assets]');
+    const content = section && section.querySelector('.schedule-assets-content');
     const assistiveLabel = toggle.querySelector('.sr-only');
-    toggle.addEventListener('click', () => {
-      const expanded = !section.classList.contains('expanded');
-      section.classList.toggle('expanded', expanded);
-      toggle.setAttribute('aria-expanded', String(expanded));
-      content.setAttribute('aria-hidden', String(!expanded));
-      assistiveLabel.textContent = assistiveLabel.textContent.replace(expanded ? /^Show/ : /^Hide/, expanded ? 'Hide' : 'Show');
-    });
-  }
+    if (!section || !content) return;
+    const expanded = !section.classList.contains('expanded');
+    section.classList.toggle('expanded', expanded);
+    toggle.setAttribute('aria-expanded', String(expanded));
+    content.setAttribute('aria-hidden', String(!expanded));
+    if (assistiveLabel) assistiveLabel.textContent = assistiveLabel.textContent.replace(expanded ? /^Show/ : /^Hide/, expanded ? 'Hide' : 'Show');
+  });
 
   for (const form of document.querySelectorAll('[data-bulk-schedule-form]')) {
     const search = form.querySelector('[data-bulk-schedule-search]');
-    const rows = [...form.querySelectorAll('[data-bulk-schedule-row]')];
-    const checks = [...form.querySelectorAll('[data-bulk-schedule-check]')];
     const selectVisible = form.querySelector('[data-bulk-select-visible]');
     const count = form.querySelector('[data-bulk-selection-count]');
     const submit = form.querySelector('[data-bulk-submit]');
     const update = () => {
+      const rows = [...form.querySelectorAll('[data-bulk-schedule-row]')];
+      const checks = [...form.querySelectorAll('[data-bulk-schedule-check]')];
       const selected = checks.filter(check => check.checked).length;
       count.textContent = `${selected} selected`;
       submit.disabled = selected === 0 || selected > 100;
-      selectVisible.checked = rows.filter(row => !row.hidden && !row.querySelector('input').disabled).every(row => row.querySelector('input').checked);
+      const selectable = rows.filter(row => !row.hidden && !row.querySelector('input').disabled);
+      selectVisible.checked = selectable.length > 0 && selectable.every(row => row.querySelector('input').checked);
     };
     search.addEventListener('input', () => {
       const query = search.value.trim().toLowerCase();
+      const rows = [...form.querySelectorAll('[data-bulk-schedule-row]')];
       for (const row of rows) row.hidden = !!query && !(row.dataset.searchText || '').includes(query);
       update();
     });
     selectVisible.addEventListener('change', () => {
+      const rows = [...form.querySelectorAll('[data-bulk-schedule-row]')];
       for (const row of rows) if (!row.hidden && !row.querySelector('input').disabled) row.querySelector('input').checked = selectVisible.checked;
       update();
     });
-    for (const check of checks) check.addEventListener('change', update);
+    form.addEventListener('change', event => { if (event.target.matches('[data-bulk-schedule-check]')) update(); });
+    form.addEventListener('cms:bulk-list-updated', update);
     update();
   }
 })();
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const root = document.querySelector('[data-schedule-collection]');
+  const form = document.getElementById('scheduleDirectoryFilter');
+  const resultCount = document.querySelector('[data-schedule-result-count]');
+  const matchCount = document.querySelector('[data-schedule-match-count]');
+  const bulkButtons = [...document.querySelectorAll('[data-schedule-bulk-open]')];
+  const bulkEndpoint = <?= json_encode(site_url('control/schedules/bulk-collection'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+  if (!root || !form || !window.CmsAsync) return;
+  const htmlNode = html => {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '').trim();
+    return template.content;
+  };
+  const parameters = () => {
+    const values = {};
+    for (const [key, value] of new FormData(form)) {
+      if (String(value) === '') continue;
+      if (Object.prototype.hasOwnProperty.call(values, key)) values[key] = Array.isArray(values[key]) ? [...values[key], value] : [values[key], value];
+      else values[key] = value;
+    }
+    const page = new URL(window.location.href).searchParams.get('page');
+    if (page) values.page = page;
+    return values;
+  };
+  const syncUrl = values => window.history.replaceState({}, '', window.CmsAsync.buildUrl(form.action, values));
+  const populateBulkLists = items => {
+    document.querySelectorAll('[data-bulk-schedule-form]').forEach(bulkForm => {
+      const list = bulkForm.querySelector('[data-bulk-schedule-list]');
+      const disableMode = bulkForm.action.endsWith('/bulk-disable');
+      list.replaceChildren();
+      items.forEach(item => {
+        const disabled = disableMode && item.bulk.status === 'disabled';
+        const label = document.createElement('label');
+        label.dataset.bulkScheduleRow = '';
+        label.dataset.searchText = item.bulk.searchText;
+        if (disabled) label.className = 'disabled';
+        const check = document.createElement('input');
+        check.type = 'checkbox'; check.name = 'schedule_ids[]'; check.value = item.id;
+        check.dataset.bulkScheduleCheck = ''; check.disabled = disabled;
+        const copy = document.createElement('span');
+        const title = document.createElement('strong'); title.textContent = item.bulk.title;
+        const summary = document.createElement('small'); summary.textContent = item.bulk.summary;
+        copy.append(title, summary); label.append(check, copy); list.appendChild(label);
+      });
+      const search = bulkForm.querySelector('[data-bulk-schedule-search]');
+      if (search) search.value = '';
+      bulkForm.dispatchEvent(new CustomEvent('cms:bulk-list-updated'));
+    });
+  };
+  const loadBulkList = () => {
+    const values = parameters();
+    delete values.page;
+    document.querySelectorAll('[data-bulk-schedule-list]').forEach(list => {
+      const loading = document.createElement('p'); loading.className = 'empty'; loading.textContent = 'Loading filtered schedules…';
+      list.replaceChildren(loading);
+    });
+    window.fetch(window.CmsAsync.buildUrl(bulkEndpoint, values), {
+      credentials: 'same-origin', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(response => {
+      if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+      return response.json();
+    }).then(payload => {
+      populateBulkLists(payload && payload.data && Array.isArray(payload.data.items) ? payload.data.items.map(item => ({
+        id: item.id,
+        bulk: { searchText: item.searchText, title: item.title, summary: item.summary, status: item.status }
+      })) : []);
+    }).catch(() => {
+      document.querySelectorAll('[data-bulk-schedule-list]').forEach(list => {
+        const error = document.createElement('p'); error.className = 'empty'; error.textContent = 'Unable to load schedules. Close this dialog and try again.';
+        list.replaceChildren(error);
+      });
+    });
+  };
+  const collection = window.CmsAsync.createCollection({
+    root,
+    endpoint: root.dataset.endpoint,
+    skeletonCount: 6,
+    skeletonVariant: 'row',
+    renderItem: item => htmlNode(item.html),
+    emptyTitle: 'No matching schedules',
+    emptyMessage: 'Reset the filters or create a new schedule.'
+  });
+  root.addEventListener('cms:collection-loaded', event => {
+    const detail = event.detail || {};
+    const pagination = detail.pagination || {};
+    const total = Number(pagination.total) || 0;
+    const totalAll = Number(detail.payload && detail.payload.totalAll) || total;
+    if (resultCount) resultCount.textContent = `${total} of ${totalAll} Schedules`;
+    if (matchCount) matchCount.textContent = `${total} results`;
+    bulkButtons.forEach(button => { button.disabled = !detail.items.length; });
+    populateBulkLists(detail.items || []);
+    document.querySelectorAll('[data-bulk-schedule-form] input[name="return_query"]').forEach(input => { input.value = window.location.search.replace(/^\?/, ''); });
+    if (window.CmsModal) window.CmsModal.refresh(root);
+    if (detail.parameters) syncUrl(detail.parameters);
+  });
+  const loadFilters = () => {
+    const values = parameters();
+    delete values.page;
+    window.history.pushState({}, '', window.CmsAsync.buildUrl(form.action, values));
+    collection.load(values);
+  };
+  form.addEventListener('submit', event => { event.preventDefault(); loadFilters(); });
+  const mainSearch = form.querySelector('input[name="q"]');
+  if (mainSearch) mainSearch.addEventListener('input', window.CmsAsync.debounce(loadFilters, 400));
+  form.querySelectorAll('select, input[type="date"]').forEach(control => control.addEventListener('change', loadFilters));
+  bulkButtons.forEach(button => button.addEventListener('click', loadBulkList));
+  window.addEventListener('popstate', () => window.location.reload());
+  collection.load(parameters());
+});
 </script>
 <?= view('web/_layout_bottom') ?>

@@ -75,10 +75,17 @@ final class ScheduleFlowTest extends CIUnitTestCase
 
         $directoryPage = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules');
         $directoryPage->assertOK();
-        $directoryBody = $directoryPage->response()->getBody();
+        $directoryCollection = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules/collection');
+        $directoryCollection->assertOK();
+        $directoryPayload = json_decode($directoryCollection->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $directoryBody = $directoryPayload['data']['items'][0]['html'];
         $this->assertStringContainsString('data-schedule-assets', $directoryBody);
         $this->assertStringContainsString('aria-expanded="false"', $directoryBody);
         $this->assertLessThan(strpos($directoryBody, 'Revision 1'), strpos($directoryBody, 'schedule-card-head-tools'));
+        $bulkCollection = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules/bulk-collection');
+        $bulkCollection->assertOK();
+        $bulkPayload = json_decode($bulkCollection->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('Jakarta Morning Playlist', $bulkPayload['data']['items'][0]['title']);
 
         $device = (new DeviceModel())->find($fixture['device']->id);
         $this->assertSame(1, (int) $device->schedule_revision);

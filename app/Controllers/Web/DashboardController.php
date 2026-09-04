@@ -6,25 +6,26 @@ use App\Controllers\BaseController;
 use App\Models\DeviceModel;
 use App\Models\LocationModel;
 use App\Models\UserModel;
-use App\Libraries\DeviceEnrollmentService;
+use Config\Player;
 
 class DashboardController extends BaseController
 {
     public function index(): string
     {
-        $allDevices = (new DeviceModel())->orderBy('created_at', 'DESC')->findAll();
-        $connection = new DeviceEnrollmentService();
+        $devices = new DeviceModel();
+        $offlineAfter = config(Player::class)->offlineAfterSeconds;
+        $onlineCutoff = gmdate('Y-m-d H:i:s', time() - $offlineAfter);
         return view('web/dashboard', [
             'title' => 'Dashboard', 'active' => 'dashboard', 'admin' => $this->admin(),
             'operatorCount' => (new UserModel())->where('role', 'operator')->countAllResults(),
             'locationCount' => (new LocationModel())->where('status', 'active')->countAllResults(),
-            'deviceCount' => count($allDevices),
-            'pendingCount' => count(array_filter($allDevices, static fn ($device): bool => $device->status === 'pending')),
-            'onlineCount' => count(array_filter($allDevices, static fn ($device): bool => $connection->connectionStatus($device) === 'online')),
-            'offlineCount' => count(array_filter($allDevices, static fn ($device): bool => $device->status === 'active' && $connection->connectionStatus($device) === 'offline')),
-            'playingCount' => count(array_filter($allDevices, static fn ($device): bool => $device->playback_state === 'playing')),
-            'errorCount' => count(array_filter($allDevices, static fn ($device): bool => $device->playback_state === 'error')),
-            'devices' => array_slice($allDevices, 0, 5),
+            'deviceCount' => (new DeviceModel())->countAllResults(),
+            'pendingCount' => (new DeviceModel())->where('status', 'pending')->countAllResults(),
+            'onlineCount' => (new DeviceModel())->where('status', 'active')->where('last_seen_at >=', $onlineCutoff)->countAllResults(),
+            'offlineCount' => (new DeviceModel())->where('status', 'active')->groupStart()->where('last_seen_at', null)->orWhere('last_seen_at <', $onlineCutoff)->groupEnd()->countAllResults(),
+            'playingCount' => (new DeviceModel())->where('playback_state', 'playing')->countAllResults(),
+            'errorCount' => (new DeviceModel())->where('playback_state', 'error')->countAllResults(),
+            'devices' => $devices->orderBy('created_at', 'DESC')->findAll(5),
         ]);
     }
 

@@ -15,16 +15,20 @@ $routes->post('logout', 'Web\AuthController::logout', ['filter' => 'web-auth']);
 $routes->group('control', ['filter' => 'web-admin'], static function (RouteCollection $routes): void {
     $routes->get('/', 'Web\DashboardController::index');
     $routes->get('operators', 'Web\OperatorController::index');
+    $routes->get('operators/collection', 'Web\OperatorController::collection');
     $routes->post('operators', 'Web\OperatorController::create');
     $routes->post('operators/(:num)/update', 'Web\OperatorController::update/$1');
     $routes->post('operators/(:num)/status', 'Web\OperatorController::status/$1');
     $routes->post('operators/(:num)/password', 'Web\OperatorController::password/$1');
     $routes->get('locations', 'Web\LocationController::index');
+    $routes->get('locations/collection', 'Web\LocationController::collection');
     $routes->post('locations', 'Web\LocationController::create');
     $routes->post('locations/(:segment)/update', 'Web\LocationController::update/$1');
     $routes->post('locations/(:segment)/status', 'Web\LocationController::status/$1');
     $routes->post('locations/(:segment)/delete', 'Web\LocationController::delete/$1');
     $routes->get('locations/(:segment)', 'Web\LocationController::show/$1');
+    $routes->get('locations/(:segment)/studios/collection', 'Web\LocationController::studioCollection/$1');
+    $routes->get('locations/(:segment)/assets/collection', 'Web\LocationController::assetAssignmentCollection/$1');
     $routes->post('locations/(:segment)/studios', 'Web\LocationController::createStudio/$1');
     $routes->post('locations/(:segment)/studios/(:segment)/details', 'Web\LocationController::updateStudio/$1/$2');
     $routes->post('locations/(:segment)/studios/(:segment)/assignment', 'Web\LocationController::assignStudio/$1/$2');
@@ -35,6 +39,7 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('locations/(:segment)/studios/(:segment)/delete', 'Web\LocationController::deleteStudio/$1/$2');
     $routes->get('devices', 'Web\DeviceController::index');
     $routes->get('devices/(:segment)/assets', 'Web\DeviceController::assets/$1');
+    $routes->get('devices/(:segment)/assets/collection', 'Web\DeviceController::assetCollection/$1');
     $routes->post('devices', 'Web\DeviceController::create');
     $routes->post('devices/(:segment)/details', 'Web\DeviceController::details/$1');
     $routes->post('devices/(:segment)/assignment', 'Web\DeviceController::assignment/$1');
@@ -60,6 +65,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('storage/(:segment)/update', 'Web\StorageController::update/$1');
     $routes->post('storage/(:segment)/delete', 'Web\StorageController::delete/$1');
     $routes->get('schedules', 'Web\ScheduleController::index');
+    $routes->get('schedules/collection', 'Web\ScheduleController::collection');
+    $routes->get('schedules/bulk-collection', 'Web\ScheduleController::bulkCollection');
     $routes->post('schedules', 'Web\ScheduleController::create');
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');
     $routes->post('schedules/(:segment)/status', 'Web\ScheduleController::status/$1');
@@ -70,7 +77,11 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
 $routes->group('control', ['filter' => 'web-assets'], static function (RouteCollection $routes): void {
     $routes->get('assets', 'Web\AssetController::index');
     $routes->get('library', 'Web\MediaLibraryController::index');
+    $routes->get('library/collection', 'Web\MediaLibraryController::collection');
     $routes->get('library/(:segment)', 'Web\MediaLibraryController::show/$1');
+    $routes->get('library/(:segment)/assignments/collection', 'Web\MediaLibraryController::assignmentCollection/$1');
+    $routes->get('library/(:segment)/versions/collection', 'Web\MediaLibraryController::versionCollection/$1');
+    $routes->get('library/(:segment)/schedules/collection', 'Web\MediaLibraryController::scheduleCollection/$1');
     $routes->post('assets/upload', 'Web\AssetController::upload');
     $routes->get('assets/(:segment)/poster', 'Web\AssetController::poster/$1');
     $routes->post('assets/(:segment)/metadata', 'Web\AssetController::updateMetadata/$1');

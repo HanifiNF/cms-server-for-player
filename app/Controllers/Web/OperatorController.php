@@ -3,34 +3,45 @@
 namespace App\Controllers\Web;
 
 use App\Controllers\BaseController;
+use App\Libraries\CollectionPage;
 use App\Models\DeviceModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 
 class OperatorController extends BaseController
 {
     public function index(): string
     {
-        $query = trim((string) $this->request->getGet('q'));
-        $role = trim((string) $this->request->getGet('role'));
-        $status = trim((string) $this->request->getGet('status'));
-        if (! in_array($role, ['', 'admin', 'operator', 'distributor'], true)) $role = '';
-        if (! in_array($status, ['', 'active', 'inactive'], true)) $status = '';
-        $users = new UserModel();
-        if ($query !== '') $users->groupStart()->like('name', $query, 'both', true, true)->orLike('email', $query, 'both', true, true)->groupEnd();
-        if ($role !== '') $users->where('role', $role);
-        if ($status !== '') $users->where('status', $status);
-        $studioCounts = [];
-        foreach ((new DeviceModel())->select('assigned_user_id, COUNT(*) AS studio_count')->where('assigned_user_id IS NOT NULL')->groupBy('assigned_user_id')->findAll() as $row) {
-            $studioCounts[(int) $row->assigned_user_id] = (int) $row->studio_count;
-        }
+        $filters = $this->accountFilters();
+        $total = (clone $this->filteredUsers($filters))->countAllResults();
         return view('web/operators', [
             'title' => 'Accounts', 'active' => 'operators', 'admin' => $this->admin(),
-            'users' => $users->orderBy('created_at', 'DESC')->findAll(),
-            'studioCounts' => $studioCounts,
-            'filters' => ['q' => $query, 'role' => $role, 'status' => $status],
+            'users' => [], 'studioCounts' => [], 'accountTotal' => $total, 'filters' => $filters,
         ]);
+    }
+
+    public function collection(): ResponseInterface
+    {
+        $filters = $this->accountFilters();
+        $total = $this->filteredUsers($filters)->countAllResults();
+        $page = CollectionPage::fromQuery((array) $this->request->getGet(), $total, 20, 100);
+        $query = $this->filteredUsers($filters);
+        $users = $query->orderBy('created_at', 'DESC')->findAll($page->perPage(), $page->offset());
+        $userIds = array_map(static fn (object $user): int => (int) $user->id, $users);
+        $studioCounts = [];
+        if ($userIds !== []) {
+            foreach ((new DeviceModel())->select('assigned_user_id, COUNT(*) AS studio_count')->whereIn('assigned_user_id', $userIds)->groupBy('assigned_user_id')->findAll() as $row) {
+                $studioCounts[(int) $row->assigned_user_id] = (int) $row->studio_count;
+            }
+        }
+        $admin = $this->admin();
+        $items = array_map(static fn (object $user): array => [
+            'id' => (int) $user->id,
+            'html' => view('web/_account_directory_row', ['user' => $user, 'admin' => $admin, 'studioCounts' => $studioCounts]),
+        ], $users);
+        return $this->response->setJSON(['data' => $page->payload($items)]);
     }
 
     public function create(): RedirectResponse
@@ -116,6 +127,26 @@ class OperatorController extends BaseController
     private function activeAdminCount(): int
     {
         return (new UserModel())->where('role', 'admin')->where('status', 'active')->countAllResults();
+    }
+
+    /** @return array{q:string,role:string,status:string} */
+    private function accountFilters(): array
+    {
+        $role = trim((string) $this->request->getGet('role'));
+        $status = trim((string) $this->request->getGet('status'));
+        if (! in_array($role, ['', 'admin', 'operator', 'distributor'], true)) $role = '';
+        if (! in_array($status, ['', 'active', 'inactive'], true)) $status = '';
+        return ['q' => mb_substr(trim((string) $this->request->getGet('q')), 0, 120), 'role' => $role, 'status' => $status];
+    }
+
+    /** @param array{q:string,role:string,status:string} $filters */
+    private function filteredUsers(array $filters): UserModel
+    {
+        $users = new UserModel();
+        if ($filters['q'] !== '') $users->groupStart()->like('name', $filters['q'])->orLike('email', $filters['q'])->groupEnd();
+        if ($filters['role'] !== '') $users->where('role', $filters['role']);
+        if ($filters['status'] !== '') $users->where('status', $filters['status']);
+        return $users;
     }
 
     private function revokeApiSessions(int $userId): void

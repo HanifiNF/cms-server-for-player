@@ -1,6 +1,8 @@
 (function () {
-  var dialogs = Array.from(document.querySelectorAll('[data-cms-modal]'));
-  if (!dialogs.length) return;
+  'use strict';
+
+  var dialogs = [];
+  var boundDialogs = new WeakSet();
   var lastFocus = new WeakMap();
 
   function syncBodyLock() {
@@ -20,14 +22,10 @@
     if (!dialog || !dialog.open || dialog.dataset.locked === 'true') return;
     dialog.close();
   }
-
-  document.querySelectorAll('[data-cms-modal-open]').forEach(function (trigger) {
-    trigger.addEventListener('click', function () { openDialog(document.getElementById(trigger.dataset.cmsModalOpen), trigger); });
-  });
-  dialogs.forEach(function (dialog) {
-    dialog.querySelectorAll('[data-cms-modal-close]').forEach(function (button) {
-      button.addEventListener('click', function () { closeDialog(dialog); });
-    });
+  function bindDialog(dialog) {
+    if (boundDialogs.has(dialog)) return;
+    boundDialogs.add(dialog);
+    dialogs.push(dialog);
     dialog.addEventListener('click', function (event) {
       if (event.target !== dialog) return;
       var box = dialog.getBoundingClientRect();
@@ -39,7 +37,25 @@
       var trigger = lastFocus.get(dialog);
       if (trigger && document.contains(trigger)) trigger.focus();
     });
+  }
+  function refresh(scope) {
+    var container = scope && scope.querySelectorAll ? scope : document;
+    if (container.matches && container.matches('[data-cms-modal]')) bindDialog(container);
+    container.querySelectorAll('[data-cms-modal]').forEach(bindDialog);
+    dialogs = dialogs.filter(function (dialog) { return document.contains(dialog); });
+    var automatic = dialogs.find(function (dialog) { return dialog.dataset.autoOpen === 'true' && !dialog.open; });
+    if (automatic) openDialog(automatic, null);
+  }
+
+  document.addEventListener('click', function (event) {
+    var closeTrigger = event.target.closest('[data-cms-modal-close]');
+    if (closeTrigger) { closeDialog(closeTrigger.closest('[data-cms-modal]')); return; }
+    var openTrigger = event.target.closest('[data-cms-modal-open]');
+    if (!openTrigger) return;
+    var dialog = document.getElementById(openTrigger.dataset.cmsModalOpen);
+    if (dialog) { bindDialog(dialog); openDialog(dialog, openTrigger); }
   });
-  var automatic = dialogs.find(function (dialog) { return dialog.dataset.autoOpen === 'true'; });
-  if (automatic) openDialog(automatic, null);
+
+  refresh(document);
+  window.CmsModal = { refresh: refresh, open: openDialog, close: closeDialog };
 })();

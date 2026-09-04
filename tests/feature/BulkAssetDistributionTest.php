@@ -50,9 +50,12 @@ final class BulkAssetDistributionTest extends CIUnitTestCase
         $detail->assertSee('Assigned Studios');
         $detail->assertSee('Global Assign');
         $detail->assertSee('Select complete Locations or individual Studios.');
-        $detail->assertSee('assigned ');
-        $detail->assertSee('JAKARTA');
         $detail->assertSee('2 Studio(s)');
+        $assignmentCollection = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->get('/control/library/' . $fixture['asset']->public_id . '/assignments/collection');
+        $assignmentCollection->assertOK();
+        $assignmentCollection->assertSee('Assigned ');
+        $assignmentCollection->assertSee('Jakarta');
     }
 
     public function testGlobalAssignmentIsSnapshotAndBulkUnassignSupportsRetainOrRemoval(): void
@@ -95,7 +98,7 @@ final class BulkAssetDistributionTest extends CIUnitTestCase
         foreach ($remaining as $assignment) $this->assertSame('removal_pending', $assignment->status);
     }
 
-    public function testDistributionDisplayPaginatesFiveLocationGroups(): void
+    public function testDistributionDisplayPaginatesFiveStudioRows(): void
     {
         $fixture = $this->fixture();
         $locations = new LocationModel();
@@ -120,16 +123,18 @@ final class BulkAssetDistributionTest extends CIUnitTestCase
         )->assertRedirectTo('/control/library/' . $fixture['asset']->public_id . '#distribution');
 
         $firstPage = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
-            ->get('/control/library/' . $fixture['asset']->public_id);
+            ->get('/control/library/' . $fixture['asset']->public_id . '/assignments/collection?per_page=5');
         $firstPage->assertOK();
-        $this->assertSame(5, substr_count($firstPage->response()->getBody(), 'class="distribution-location-group"'));
-        $firstPage->assertSee('See more');
+        $this->assertSame(5, substr_count($firstPage->response()->getBody(), 'class=\"distribution-studio-name\"'));
+        $firstPayload = json_decode($firstPage->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertTrue($firstPayload['data']['pagination']['hasNext']);
 
         $secondPage = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
-            ->get('/control/library/' . $fixture['asset']->public_id . '?assignment_page=2');
+            ->get('/control/library/' . $fixture['asset']->public_id . '/assignments/collection?per_page=5&page=2');
         $secondPage->assertOK();
-        $this->assertSame(1, substr_count($secondPage->response()->getBody(), 'class="distribution-location-group"'));
-        $secondPage->assertSee('Previous');
+        $this->assertSame(2, substr_count($secondPage->response()->getBody(), 'class=\"distribution-studio-name\"'));
+        $secondPayload = json_decode($secondPage->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertTrue($secondPayload['data']['pagination']['hasPrevious']);
     }
 
     public function testStudioCanAssignMultipleAssetsWithOneRevisionAndRealtimeEvent(): void
@@ -166,10 +171,16 @@ final class BulkAssetDistributionTest extends CIUnitTestCase
         $page = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
             ->get('/control/locations/' . $fixture['bogor']->public_id);
         $page->assertOK();
-        $page->assertSee('Assign Assets');
-        $page->assertSee('View Assets');
-        $page->assertSee('Studio Side Trailer');
-        $page->assertSee('Select all filtered');
+        $page->assertSee('Select page');
+        $assetCollection = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->get('/control/locations/' . $fixture['bogor']->public_id . '/assets/collection?q=Studio+Side');
+        $assetCollection->assertOK();
+        $assetCollection->assertSee('Studio Side Trailer');
+        $studioCollection = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
+            ->get('/control/locations/' . $fixture['bogor']->public_id . '/studios/collection');
+        $studioCollection->assertOK();
+        $studioCollection->assertSee('Assign Assets');
+        $studioCollection->assertSee('View Assets');
     }
 
     /** @return array<string,mixed> */

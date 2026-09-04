@@ -5,6 +5,7 @@ namespace App\Controllers\Web;
 use App\Controllers\BaseController;
 use App\Libraries\AssetExpiryService;
 use App\Libraries\AssetTaxonomyService;
+use App\Libraries\CollectionPage;
 use App\Libraries\DeviceEnrollmentService;
 use App\Libraries\LocationService;
 use App\Libraries\RealtimeOutboxService;
@@ -14,6 +15,7 @@ use App\Models\DeviceModel;
 use App\Models\LocationModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
 use Config\Database;
 use DateTimeZone;
 use RuntimeException;
@@ -23,11 +25,24 @@ class LocationController extends BaseController
 {
     public function index(): string
     {
-        $query = mb_strtolower(trim((string) $this->request->getGet('q')));
-        $status = trim((string) $this->request->getGet('status'));
-        if (! in_array($status, ['', 'active', 'inactive'], true)) $status = '';
-        $locations = (new LocationModel())->orderBy('name')->findAll();
-        $devices = (new DeviceModel())->orderBy('name')->findAll();
+        $filters = $this->locationFilters();
+        $total = (clone $this->filteredLocations($filters))->countAllResults();
+
+        return view('web/locations', [
+            'title' => 'Locations', 'active' => 'locations', 'admin' => $this->admin(),
+            'locations' => [], 'locationTotal' => $total, 'filters' => $filters,
+        ]);
+    }
+
+    public function collection(): ResponseInterface
+    {
+        $filters = $this->locationFilters();
+        $total = $this->filteredLocations($filters)->countAllResults();
+        $page = CollectionPage::fromQuery((array) $this->request->getGet(), $total, 20, 100);
+        $query = $this->filteredLocations($filters);
+        $locations = $query->orderBy('name')->findAll($page->perPage(), $page->offset());
+        $locationIds = array_map(static fn (object $location): int => (int) $location->id, $locations);
+        $devices = $locationIds === [] ? [] : (new DeviceModel())->whereIn('location_id', $locationIds)->orderBy('name')->findAll();
         $connection = new DeviceEnrollmentService();
         $byLocation = [];
         foreach ($devices as $device) {
@@ -37,12 +52,10 @@ class LocationController extends BaseController
                 'connection' => $device->status === 'active' ? $connection->connectionStatus($device) : $device->status,
             ];
         }
-        $items = [];
+        $rows = [];
         foreach ($locations as $location) {
-            if ($status !== '' && $location->status !== $status) continue;
-            if ($query !== '' && ! str_contains(mb_strtolower($location->name . ' ' . $location->code . ' ' . $location->address), $query)) continue;
             $studios = $byLocation[(int) $location->id] ?? [];
-            $items[] = [
+            $rows[] = [
                 'entity' => $location,
                 'studios' => $studios,
                 'total' => count($studios),
@@ -52,11 +65,12 @@ class LocationController extends BaseController
                 'errors' => count(array_filter($studios, static fn (array $item): bool => $item['entity']->playback_state === 'error')),
             ];
         }
+        $items = array_map(static fn (array $item): array => [
+            'id' => (string) $item['entity']->public_id,
+            'html' => view('web/_location_directory_card', compact('item')),
+        ], $rows);
 
-        return view('web/locations', [
-            'title' => 'Locations', 'active' => 'locations', 'admin' => $this->admin(),
-            'locations' => $items, 'filters' => ['q' => (string) $this->request->getGet('q'), 'status' => $status],
-        ]);
+        return $this->response->setJSON(['data' => $page->payload($items)]);
     }
 
     public function create(): RedirectResponse
@@ -76,6 +90,59 @@ class LocationController extends BaseController
         if ($location === null) return redirect()->to('/control/locations')->with('error', 'Location was not found.');
 
         $operators = (new UserModel())->where('role', 'operator')->where('status', 'active')->orderBy('name')->findAll();
+        $assignmentCounts = [];
+        foreach ((new DeviceModel())->select('assigned_user_id, COUNT(*) AS studio_count')->where('assigned_user_id IS NOT NULL')->groupBy('assigned_user_id')->findAll() as $row) {
+            $assignmentCounts[(int) $row->assigned_user_id] = (int) $row->studio_count;
+        }
+        $studioFilters = $this->studioFilters();
+        $studioTotal = (clone $this->filteredStudios((int) $location->id, $studioFilters))->countAllResults();
+
+        return view('web/location_detail', [
+            'title' => $location->name, 'active' => 'locations', 'admin' => $this->admin(),
+            'location' => $location, 'studios' => [], 'studioTotal' => $studioTotal, 'studioFilters' => $studioFilters, 'operators' => $operators,
+            'assignmentCounts' => $assignmentCounts,
+            'availableLocations' => (new LocationModel())->where('status', 'active')->orderBy('name')->findAll(),
+            'assetTypes' => AssetTaxonomyService::TYPES,
+        ]);
+    }
+
+    public function assetAssignmentCollection(string $publicId): ResponseInterface
+    {
+        (new AssetExpiryService())->expireDue();
+        if ($this->location($publicId) === null) return $this->response->setStatusCode(404)->setJSON(['error' => ['message' => 'Location was not found.']]);
+        $queryText = mb_substr(trim((string) $this->request->getGet('q')), 0, 120);
+        $assetType = trim((string) $this->request->getGet('type'));
+        if (! in_array($assetType, ['', ...AssetTaxonomyService::TYPES], true)) $assetType = '';
+        $makeQuery = static function () use ($assetType, $queryText): AssetModel {
+            $query = (new AssetModel())->where('status', 'active');
+            if ($assetType !== '') $query->where('asset_type', $assetType);
+            if ($queryText !== '') $query->groupStart()->like('title', $queryText)->orLike('filename', $queryText)
+                ->orLike('distributor_company', $queryText)->orLike('genre', $queryText)->groupEnd();
+            return $query;
+        };
+        $total = $makeQuery()->countAllResults();
+        $page = CollectionPage::fromQuery((array) $this->request->getGet(), $total, 20, 100);
+        $query = $makeQuery();
+        $assets = $query->orderBy('title')->findAll($page->perPage(), $page->offset());
+        $genres = (new AssetTaxonomyService())->mapForAssets(array_map(static fn (object $asset): int => (int) $asset->id, $assets));
+        $items = array_map(static fn (object $asset): array => [
+            'id' => (string) $asset->public_id,
+            'html' => view('web/_studio_asset_option', ['asset' => $asset, 'genres' => $genres[(int) $asset->id] ?? []]),
+        ], $assets);
+        return $this->response->setJSON(['data' => $page->payload($items)]);
+    }
+
+    public function studioCollection(string $publicId): ResponseInterface
+    {
+        $location = $this->location($publicId);
+        if ($location === null) return $this->response->setStatusCode(404)->setJSON(['error' => ['message' => 'Location was not found.']]);
+        $filters = $this->studioFilters();
+        $total = $this->filteredStudios((int) $location->id, $filters)->countAllResults();
+        $page = CollectionPage::fromQuery((array) $this->request->getGet(), $total, 20, 100);
+        $query = $this->filteredStudios((int) $location->id, $filters);
+        $devices = $query->orderBy('name')->findAll($page->perPage(), $page->offset());
+        $deviceIds = array_map(static fn (object $device): int => (int) $device->id, $devices);
+        $operators = (new UserModel())->where('role', 'operator')->where('status', 'active')->orderBy('name')->findAll();
         $operatorNames = [];
         foreach ((new UserModel())->where('role', 'operator')->findAll() as $operator) $operatorNames[(int) $operator->id] = $operator->name;
         $assignmentCounts = [];
@@ -83,40 +150,30 @@ class LocationController extends BaseController
             $assignmentCounts[(int) $row->assigned_user_id] = (int) $row->studio_count;
         }
         $assetCounts = [];
-        foreach ((new DeviceAssetModel())->select('device_id, COUNT(*) AS asset_count')->groupBy('device_id')->findAll() as $row) {
-            $assetCounts[(int) $row->device_id] = (int) $row->asset_count;
-        }
-        $assignableAssets = (new AssetModel())->where('status', 'active')->orderBy('title')->findAll();
-        $assetIds = array_map(static fn (object $asset): int => (int) $asset->id, $assignableAssets);
-        $assetPublicIds = [];
-        foreach ($assignableAssets as $asset) $assetPublicIds[(int) $asset->id] = (string) $asset->public_id;
         $assignedAssets = [];
-        if ($assetPublicIds !== []) {
-            foreach ((new DeviceAssetModel())->whereIn('asset_id', array_keys($assetPublicIds))->findAll() as $assignment) {
-                $assignedAssets[(int) $assignment->device_id][] = $assetPublicIds[(int) $assignment->asset_id];
+        if ($deviceIds !== []) {
+            foreach ((new DeviceAssetModel())->select('device_id, COUNT(*) AS asset_count')->whereIn('device_id', $deviceIds)->groupBy('device_id')->findAll() as $row) {
+                $assetCounts[(int) $row->device_id] = (int) $row->asset_count;
+            }
+            foreach (Database::connect()->table('device_assets da')->select('da.device_id, a.public_id')
+                ->join('assets a', 'a.id = da.asset_id')->whereIn('da.device_id', $deviceIds)->get()->getResultArray() as $assignment) {
+                $assignedAssets[(int) $assignment['device_id']][] = (string) $assignment['public_id'];
             }
         }
-        $assetGenres = (new AssetTaxonomyService())->mapForAssets($assetIds);
         $connection = new DeviceEnrollmentService();
-        $studios = [];
-        foreach ((new DeviceModel())->where('location_id', $location->id)->orderBy('name')->findAll() as $device) {
-            $studios[] = [
+        $availableLocations = (new LocationModel())->where('status', 'active')->orderBy('name')->findAll();
+        $items = [];
+        foreach ($devices as $device) {
+            $item = [
                 'entity' => $device,
                 'connection' => $device->status === 'active' ? $connection->connectionStatus($device) : $device->status,
                 'operatorName' => $operatorNames[(int) $device->assigned_user_id] ?? 'Unassigned',
                 'assetCount' => $assetCounts[(int) $device->id] ?? 0,
                 'assignedAssetIds' => $assignedAssets[(int) $device->id] ?? [],
             ];
+            $items[] = ['id' => (string) $device->public_id, 'html' => view('web/_studio_management_row', compact('item', 'location', 'operators', 'assignmentCounts', 'availableLocations'))];
         }
-
-        return view('web/location_detail', [
-            'title' => $location->name, 'active' => 'locations', 'admin' => $this->admin(),
-            'location' => $location, 'studios' => $studios, 'operators' => $operators,
-            'assignmentCounts' => $assignmentCounts,
-            'availableLocations' => (new LocationModel())->where('status', 'active')->orderBy('name')->findAll(),
-            'assignableAssets' => $assignableAssets, 'assetGenres' => $assetGenres,
-            'assetTypes' => AssetTaxonomyService::TYPES,
-        ]);
+        return $this->response->setJSON(['data' => $page->payload($items)]);
     }
 
     public function createStudio(string $publicId): RedirectResponse
@@ -365,6 +422,42 @@ class LocationController extends BaseController
         } catch (Throwable $error) {
             return redirect()->to('/control/locations')->with('error', $error->getMessage());
         }
+    }
+
+    /** @return array{q:string,status:string} */
+    private function locationFilters(): array
+    {
+        $status = trim((string) $this->request->getGet('status'));
+        if (! in_array($status, ['', 'active', 'inactive'], true)) $status = '';
+        return ['q' => mb_substr(trim((string) $this->request->getGet('q')), 0, 120), 'status' => $status];
+    }
+
+    /** @param array{q:string,status:string} $filters */
+    private function filteredLocations(array $filters): LocationModel
+    {
+        $query = new LocationModel();
+        if ($filters['q'] !== '') {
+            $query->groupStart()->like('name', $filters['q'])->orLike('code', $filters['q'])->orLike('address', $filters['q'])->groupEnd();
+        }
+        if ($filters['status'] !== '') $query->where('status', $filters['status']);
+        return $query;
+    }
+
+    /** @return array{q:string,status:string} */
+    private function studioFilters(): array
+    {
+        $status = trim((string) $this->request->getGet('studio_status'));
+        if (! in_array($status, ['', 'pending', 'active', 'revoked'], true)) $status = '';
+        return ['q' => mb_substr(trim((string) $this->request->getGet('studio_q')), 0, 120), 'status' => $status];
+    }
+
+    /** @param array{q:string,status:string} $filters */
+    private function filteredStudios(int $locationId, array $filters): DeviceModel
+    {
+        $query = (new DeviceModel())->where('location_id', $locationId);
+        if ($filters['q'] !== '') $query->groupStart()->like('name', $filters['q'])->orLike('public_id', $filters['q'])->groupEnd();
+        if ($filters['status'] !== '') $query->where('status', $filters['status']);
+        return $query;
     }
 
     private function admin(): object

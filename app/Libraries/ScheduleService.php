@@ -98,15 +98,35 @@ class ScheduleService
     public function listForWeb(): array
     {
         $rows = $this->db->table('schedules')->orderBy('start_at', 'DESC')->get()->getResultArray();
+        if ($rows === []) return [];
+        $scheduleIds = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+        $targets = [];
+        foreach ($this->db->table('schedule_targets st')
+            ->select('st.schedule_id, d.id AS device_id, d.public_id, d.name, d.location, d.location_id, l.public_id AS location_public_id, l.name AS location_name')
+            ->join('devices d', 'd.id = st.device_id')->join('locations l', 'l.id = d.location_id', 'left')
+            ->whereIn('st.schedule_id', $scheduleIds)->orderBy('d.location')->orderBy('d.name')->get()->getResultArray() as $target) {
+            $targets[(int) $target['schedule_id']][] = $target;
+        }
+        $items = [];
+        foreach ($this->db->table('schedule_items si')
+            ->select('si.*, a.public_id AS asset_public_id, a.status AS asset_status')
+            ->join('assets a', 'a.id = si.asset_id', 'left')->whereIn('si.schedule_id', $scheduleIds)
+            ->orderBy('si.schedule_id')->orderBy('si.position', 'ASC')->get()->getResultArray() as $item) {
+            $items[(int) $item['schedule_id']][] = $item;
+        }
 
-        return array_map(fn (array $row): array => $this->hydrateForWeb($row), $rows);
+        return array_map(fn (array $row): array => $this->hydrateForWeb(
+            $row,
+            $targets[(int) $row['id']] ?? [],
+            $items[(int) $row['id']] ?? [],
+        ), $rows);
     }
 
     /**
      * @param array<string, mixed> $input
      * @return array{rows:list<array<string,mixed>>,all:list<array<string,mixed>>,filters:array<string,mixed>,options:array<string,mixed>,total:int,page:int,per_page:int,pages:int}
      */
-    public function directory(array $input, int $perPage = 20): array
+    public function directory(array $input, int $perPage = 20, bool $includeOptions = true): array
     {
         $filter = new ScheduleDirectoryFilter($this->recurrence);
         $filters = $filter->normalize($input);
@@ -121,13 +141,65 @@ class ScheduleService
             'rows' => array_slice($filtered, ($page - 1) * $perPage, $perPage),
             'all' => $filtered,
             'filters' => $filters,
-            'options' => $this->directoryOptions($allRows),
+            'options' => $includeOptions ? $this->directoryOptionsForWeb() : ['locations' => [], 'assets' => []],
             'total' => $total,
             'total_all' => count($allRows),
             'page' => $page,
             'per_page' => $perPage,
             'pages' => $pages,
         ];
+    }
+
+    /**
+     * Builds the filter choices without hydrating every schedule timeline.
+     *
+     * @return array{locations:list<array<string,mixed>>,assets:list<array<string,mixed>>}
+     */
+    public function directoryOptionsForWeb(): array
+    {
+        $targetsBySchedule = [];
+        $locations = [];
+        foreach ($this->db->table('schedule_targets st')
+            ->select('st.schedule_id, d.public_id AS device_id, d.name AS device_name, d.location AS legacy_location, l.public_id AS location_id, l.name AS location_name')
+            ->join('devices d', 'd.id = st.device_id')
+            ->join('locations l', 'l.id = d.location_id', 'left')
+            ->orderBy('l.name')->orderBy('d.name')->get()->getResultArray() as $target) {
+            $scheduleId = (int) $target['schedule_id'];
+            $deviceId = (string) $target['device_id'];
+            $locationName = (string) ($target['location_name'] ?: $target['legacy_location'] ?: 'No Location');
+            $locationId = (string) ($target['location_id'] ?: 'legacy:' . sha1($locationName));
+            $targetsBySchedule[$scheduleId]['location_ids'][] = $locationId;
+            $targetsBySchedule[$scheduleId]['device_ids'][] = $deviceId;
+            $locations[$locationId] ??= ['id' => $locationId, 'name' => $locationName, 'studios' => []];
+            $locations[$locationId]['studios'][$deviceId] = ['id' => $deviceId, 'name' => (string) $target['device_name']];
+        }
+
+        $assets = [];
+        foreach ($this->db->table('schedule_items si')
+            ->select('si.schedule_id, a.public_id AS asset_id, si.title_snapshot')
+            ->join('assets a', 'a.id = si.asset_id', 'left')->where('a.public_id IS NOT NULL')
+            ->get()->getResultArray() as $item) {
+            $assetId = (string) $item['asset_id'];
+            $target = $targetsBySchedule[(int) $item['schedule_id']] ?? ['location_ids' => [], 'device_ids' => []];
+            $assets[$assetId] ??= ['id' => $assetId, 'title' => (string) ($item['title_snapshot'] ?: 'Untitled'), 'location_ids' => [], 'device_ids' => []];
+            $assets[$assetId]['location_ids'] = array_values(array_unique([...$assets[$assetId]['location_ids'], ...($target['location_ids'] ?? [])]));
+            $assets[$assetId]['device_ids'] = array_values(array_unique([...$assets[$assetId]['device_ids'], ...($target['device_ids'] ?? [])]));
+        }
+
+        foreach ($locations as &$location) {
+            $location['studios'] = array_values($location['studios']);
+            usort($location['studios'], static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        }
+        unset($location);
+        usort($locations, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        usort($assets, static fn (array $a, array $b): int => strcasecmp($a['title'], $b['title']));
+
+        return ['locations' => array_values($locations), 'assets' => array_values($assets)];
+    }
+
+    public function scheduleCountForWeb(): int
+    {
+        return $this->db->table('schedules')->countAllResults();
     }
 
     /** @return array<string, mixed>|null */
@@ -607,9 +679,9 @@ class ScheduleService
     }
 
     /** @param array<string, mixed> $row @return array<string, mixed> */
-    private function hydrateForWeb(array $row): array
+    private function hydrateForWeb(array $row, ?array $targets = null, ?array $items = null): array
     {
-        $row['targets'] = $this->targetsForSchedule((int) $row['id']);
+        $row['targets'] = $targets ?? $this->targetsForSchedule((int) $row['id']);
         foreach ($row['targets'] as &$target) {
             $target['location'] = (string) ($target['location_name'] ?: $target['location']);
         }
@@ -620,7 +692,7 @@ class ScheduleService
         $row['device_location'] = $first['location'] ?? null;
         $row['target_count'] = count($row['targets']);
         $row['location_count'] = count(array_unique(array_filter(array_column($row['targets'], 'location'))));
-        $timeline = $this->timeline->calculate($this->itemsForSchedule((int) $row['id']), (bool) $row['loop_enabled']);
+        $timeline = $this->timeline->calculate($items ?? $this->itemsForSchedule((int) $row['id']), (bool) $row['loop_enabled']);
         $row['items'] = $timeline['items'];
         $row['timeline'] = $timeline;
         $row['display_status'] = $this->displayStatus($row);

@@ -49,8 +49,10 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library');
         $page->assertOK();
         $page->assertSee('DISTRIBUTOR PORTAL');
-        $page->assertSee('Distributor One Draft');
-        $page->assertDontSee('Distributor Two Draft');
+        $collection = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library/collection');
+        $collection->assertOK();
+        $collection->assertSee('Distributor One Draft');
+        $collection->assertDontSee('Distributor Two Draft');
         $page->assertDontSee('Players');
         $this->assertStringNotContainsString('/control/schedules', $page->response()->getBody());
         $page->assertDontSee('Approve Film');
@@ -198,7 +200,7 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
         ]);
 
         $filtered = $this->withSession(['cms_web_user_id' => $fixture['adminId']])
-            ->get('/control/library?q=Jakarta&status=draft&distributor=' . $fixture['distributorOneId']);
+            ->get('/control/library/collection?q=Jakarta&status=draft&distributor=' . $fixture['distributorOneId']);
         $filtered->assertOK();
         $filtered->assertSee('Distributor One Draft');
         $filtered->assertDontSee('Distributor Two Draft');
@@ -266,8 +268,11 @@ final class DistributorAssetWorkflowTest extends CIUnitTestCase
 
         $page = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])->get('/control/library/' . $asset->public_id);
         $page->assertOK();
-        $page->assertSee('Revision 2');
         $page->assertSee('Submitted versions');
+        $versionCollection = $this->withSession(['cms_web_user_id' => $fixture['distributorOneId']])
+            ->get('/control/library/' . $asset->public_id . '/versions/collection');
+        $versionCollection->assertOK();
+        $versionCollection->assertSee('Revision 2');
 
         $this->withSession(['cms_web_user_id' => $fixture['adminId']])
             ->postForm('/control/assets/' . $asset->public_id . '/approve', [])

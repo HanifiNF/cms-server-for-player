@@ -1,0 +1,1 @@
+<div><span><strong><?= esc($row['title']) ?></strong><small><?= esc($row['device_name']) ?><?= $row['location_name'] ? ' · ' . esc($row['location_name']) : '' ?> · <?= esc(ucfirst($row['recurrence'])) ?></small></span><span class="badge <?= esc($row['status']) ?>"><?= esc(strtoupper($row['status'])) ?></span></div>

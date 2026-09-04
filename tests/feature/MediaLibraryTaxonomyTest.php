@@ -54,12 +54,13 @@ final class MediaLibraryTaxonomyTest extends CIUnitTestCase
         ]);
 
         $library = $this->withSession(['cms_web_user_id' => $adminId])
-            ->get('/control/library?type=trailer&genre=' . $adventure->id . '&availability=available');
+            ->get('/control/library/collection?type=trailer&genre=' . $adventure->id . '&availability=available');
         $library->assertOK();
         $library->assertSee('Mountain Preview');
         $library->assertSee('TRAILER');
         $library->assertSee('Historical Epic');
-        $library->assertSee('1 results');
+        $libraryPayload = json_decode($library->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(1, (int) $libraryPayload['data']['pagination']['total']);
 
         $detail = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/library/61000000-2222-4333-8444-555555555555');
         $detail->assertOK();

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?= esc($title) ?> · Player CMS</title>
   <link rel="stylesheet" href="<?= base_url('assets/cms.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-async.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-async.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-lifecycle.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-lifecycle.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-schedules.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-schedules.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-locations.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-locations.css') ?: 1) ?>">

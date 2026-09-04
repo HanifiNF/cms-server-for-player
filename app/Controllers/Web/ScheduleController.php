@@ -5,9 +5,12 @@ namespace App\Controllers\Web;
 use App\Controllers\BaseController;
 use App\Libraries\ScheduleService;
 use App\Libraries\AssetExpiryService;
+use App\Libraries\CollectionPage;
+use App\Libraries\ScheduleDirectoryFilter;
 use App\Libraries\ScheduleValidationException;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
 use DateTimeImmutable;
 use DateTimeZone;
 use Throwable;
@@ -18,7 +21,13 @@ class ScheduleController extends BaseController
     {
         (new AssetExpiryService())->expireDue();
         $service = new ScheduleService();
-        $directory = $service->directory((array) $this->request->getGet());
+        $filters = (new ScheduleDirectoryFilter())->normalize((array) $this->request->getGet());
+        $directory = [
+            'rows' => [], 'all' => [], 'filters' => $filters,
+            'options' => $service->directoryOptionsForWeb(),
+            'total' => 0, 'total_all' => $service->scheduleCountForWeb(),
+            'page' => 1, 'per_page' => 20, 'pages' => 1,
+        ];
         $editId = trim((string) $this->request->getGet('edit'));
         $editing = $editId !== '' ? $service->findForWeb($editId) : null;
         if ($editing !== null) {
@@ -35,6 +44,60 @@ class ScheduleController extends BaseController
             'devices' => $service->readyMediaByDevice(), 'schedules' => $directory['rows'],
             'scheduleDirectory' => $directory,
             'editing' => $editing,
+        ]);
+    }
+
+    public function collection(): ResponseInterface
+    {
+        (new AssetExpiryService())->expireDue();
+        $input = (array) $this->request->getGet();
+        $directory = (new ScheduleService())->directory($input, 20, false);
+        $page = CollectionPage::fromQuery($input, (int) $directory['total'], 20, 100);
+        $formatDuration = static function (int $milliseconds): string {
+            $seconds = max(0, intdiv($milliseconds, 1000));
+            return sprintf('%02d:%02d:%02d', intdiv($seconds, 3600), intdiv($seconds % 3600, 60), $seconds % 60);
+        };
+        $items = [];
+        foreach ($directory['rows'] as $schedule) {
+            $bulkText = mb_strtolower($schedule['title'] . ' ' . implode(' ', array_column($schedule['targets'], 'name')) . ' ' . implode(' ', array_column($schedule['targets'], 'location')) . ' ' . implode(' ', array_column($schedule['items'], 'title_snapshot')) . ' ' . $schedule['display_status']);
+            $items[] = [
+                'id' => (string) $schedule['public_id'],
+                'html' => view('web/_schedule_directory_card', compact('schedule', 'formatDuration')),
+                'bulk' => [
+                    'searchText' => $bulkText,
+                    'title' => (string) $schedule['title'],
+                    'summary' => implode(', ', array_column($schedule['targets'], 'name')) . ' · ' . strtoupper((string) $schedule['display_status']) . ' · ' . count($schedule['items']) . ' asset(s)',
+                    'status' => (string) $schedule['status'],
+                ],
+            ];
+        }
+
+        return $this->response->setJSON([
+            'data' => [
+                ...$page->payload($items),
+                'totalAll' => (int) $directory['total_all'],
+            ],
+        ]);
+    }
+
+    public function bulkCollection(): ResponseInterface
+    {
+        $input = (array) $this->request->getGet();
+        $input['page'] = 1;
+        $directory = (new ScheduleService())->directory($input, 100, false);
+        $items = [];
+        foreach ($directory['rows'] as $schedule) {
+            $items[] = [
+                'id' => (string) $schedule['public_id'],
+                'searchText' => mb_strtolower($schedule['title'] . ' ' . implode(' ', array_column($schedule['targets'], 'name')) . ' ' . implode(' ', array_column($schedule['targets'], 'location')) . ' ' . implode(' ', array_column($schedule['items'], 'title_snapshot')) . ' ' . $schedule['display_status']),
+                'title' => (string) $schedule['title'],
+                'summary' => implode(', ', array_column($schedule['targets'], 'name')) . ' · ' . strtoupper((string) $schedule['display_status']) . ' · ' . count($schedule['items']) . ' asset(s)',
+                'status' => (string) $schedule['status'],
+            ];
+        }
+
+        return $this->response->setJSON([
+            'data' => ['items' => $items, 'total' => (int) $directory['total'], 'limited' => (int) $directory['total'] > 100],
         ]);
     }
 

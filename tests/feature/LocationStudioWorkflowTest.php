@@ -55,11 +55,15 @@ final class LocationStudioWorkflowTest extends CIUnitTestCase
         $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations');
         $page->assertOK();
         $page->assertSee('Locations and Studios');
-        $page->assertSee('Studio 1');
+        $locationCollection = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/collection');
+        $locationCollection->assertOK();
+        $locationCollection->assertSee('Studio 1');
         $detail = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id);
         $detail->assertOK();
         $detail->assertSee('Studios at this Location');
-        $detail->assertSee('Add new operator');
+        $studioCollection = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/locations/' . $location->public_id . '/studios/collection');
+        $studioCollection->assertOK();
+        $studioCollection->assertSee('Add new operator');
     }
 
     public function testLocationWorkflowCreatesOperatorResetsPairingRevokesAndDeletesStudio(): void
