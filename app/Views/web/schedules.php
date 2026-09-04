@@ -160,10 +160,12 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
     if ($schedule['recurrence'] !== 'one_time') $repeatLabel .= !empty($recurrenceConfig['until']) ? ' · until ' . $recurrenceConfig['until'] : ' · no end date';
   ?>
     <article class="card schedule-card">
-      <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div>
+      <div class="schedule-card-head"><div><span class="badge <?= esc($schedule['display_status']) ?>"><?= esc(strtoupper($schedule['display_status'])) ?></span><h3><?= esc($schedule['title']) ?></h3><p><?php if ((int) $schedule['target_count'] === 1): ?><?= esc($schedule['device_name']) ?><?= $schedule['device_location'] ? ' · ' . esc($schedule['device_location']) : '' ?><?php else: ?><?= (int) $schedule['target_count'] ?> Studios · <?= (int) $schedule['location_count'] ?> Locations<?php endif ?></p></div><div class="schedule-card-head-tools"><div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div><strong>Revision <?= (int) $schedule['revision'] ?></strong></div></div>
       <?php if ((int) $schedule['target_count'] > 1): ?><details class="schedule-card-targets"><summary>View <?= (int) $schedule['target_count'] ?> target Studios <span>⌄</span></summary><div><?php foreach ($schedule['targets'] as $target): ?><span><strong><?= esc($target['name']) ?></strong><small><?= esc($target['location'] ?: 'No Location') ?></small></span><?php endforeach ?></div></details><?php endif ?>
       <div class="schedule-meta schedule-meta-detailed"><span><small>FIRST START</small><?= esc($start->format('Y-m-d H:i:s')) ?></span><span><small>OCCURRENCE END</small><?= esc($end->format('Y-m-d H:i:s')) ?></span><span><small>FILM DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['film_duration_ms'])) ?></span><span><small>TOTAL GAP</small><?= esc($formatDuration((int) $schedule['timeline']['gap_duration_ms'])) ?></span><span><small>TOTAL DURATION</small><?= esc($formatDuration((int) $schedule['timeline']['total_duration_ms'])) ?></span><span><small>REPEAT</small><?= esc($repeatLabel) ?></span></div>
-      <ol class="schedule-items schedule-timeline-items">
+      <section class="schedule-assets-collapse" data-schedule-assets>
+      <button class="schedule-assets-toggle" type="button" aria-expanded="false" aria-controls="schedule-assets-<?= esc($schedule['public_id'], 'attr') ?>"><span aria-hidden="true"></span><b aria-hidden="true">⌄</b><span aria-hidden="true"></span><i class="sr-only">Show <?= count($schedule['items']) ?> schedule assets</i></button>
+      <div class="schedule-assets-content" id="schedule-assets-<?= esc($schedule['public_id'], 'attr') ?>" aria-hidden="true"><div class="schedule-assets-inner"><ol class="schedule-items schedule-timeline-items">
         <?php foreach ($schedule['items'] as $item):
           $itemStart = $start->modify('+' . (int) $item['start_offset_ms'] . ' milliseconds');
           $contentEnd = $start->modify('+' . (int) $item['content_end_offset_ms'] . ' milliseconds');
@@ -175,8 +177,8 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
             <div class="schedule-item-times"><span><small>STARTS AT</small><?= esc($itemStart->format('Y-m-d H:i:s')) ?></span><span><small>CONTENT ENDS</small><?= esc($contentEnd->format('Y-m-d H:i:s')) ?></span><span><small><?= $effectiveGap > 0 ? 'NEXT START' : 'TIMELINE END' ?></small><?= esc(($effectiveGap > 0 ? $nextStart : $contentEnd)->format('Y-m-d H:i:s')) ?></span></div>
           </li>
         <?php endforeach ?>
-      </ol>
-      <div class="schedule-actions"><a class="btn ghost" href="<?= site_url('control/schedules?edit=' . rawurlencode($schedule['public_id'])) ?>">Edit</a><button class="btn ghost" type="button" data-cms-modal-open="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>"><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button><button class="btn danger" type="button" data-cms-modal-open="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>">Delete</button></div>
+      </ol></div></div>
+      </section>
     </article>
     <dialog class="cms-action-modal" id="status-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/status') ?>" class="cms-modal-shell"><?= csrf_field() ?><input type="hidden" name="enabled" value="<?= $schedule['status'] === 'active' ? '0' : '1' ?>"><header class="cms-modal-header"><div><p>SCHEDULE STATUS</p><h2><?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?> <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message <?= $schedule['status'] === 'active' ? 'danger' : '' ?>"><strong><?= $schedule['status'] === 'active' ? 'Future playback occurrences will be disabled.' : 'The schedule will become available to all target Players.' ?></strong>The updated revision is delivered to every target Studio when it refreshes or receives its realtime notification.</div></div><footer class="cms-modal-footer"><span>Schedule status change</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn <?= $schedule['status'] === 'active' ? 'danger' : 'primary' ?>" type="submit">Confirm <?= $schedule['status'] === 'active' ? 'Disable' : 'Enable' ?></button></div></footer></form></dialog>
     <dialog class="cms-action-modal" id="delete-schedule-<?= esc($schedule['public_id'], 'attr') ?>" data-cms-modal><form method="post" action="<?= site_url('control/schedules/' . rawurlencode($schedule['public_id']) . '/delete') ?>" class="cms-modal-shell"><?= csrf_field() ?><header class="cms-modal-header"><div><p>DANGER ZONE</p><h2>Delete <?= esc($schedule['title']) ?>?</h2></div><button class="cms-modal-x" type="button" data-cms-modal-close>×</button></header><div class="cms-modal-body"><div class="cms-confirm-message danger"><strong>This schedule will be permanently removed.</strong>All target Players remove it from their local schedule cache on the next refresh.</div></div><footer class="cms-modal-footer"><span>Permanent deletion</span><div><button class="btn ghost" type="button" data-cms-modal-close>Cancel</button><button class="btn danger" type="submit">Delete Schedule</button></div></footer></form></dialog>
@@ -593,6 +595,19 @@ $selectedAssets = (array) ($directoryFilters['asset_ids'] ?? []);
       if (container.closest('#directoryAssetPicker')) refreshAssets();
     });
     refreshAssets();
+  }
+
+  for (const section of document.querySelectorAll('[data-schedule-assets]')) {
+    const toggle = section.querySelector('.schedule-assets-toggle');
+    const content = section.querySelector('.schedule-assets-content');
+    const assistiveLabel = toggle.querySelector('.sr-only');
+    toggle.addEventListener('click', () => {
+      const expanded = !section.classList.contains('expanded');
+      section.classList.toggle('expanded', expanded);
+      toggle.setAttribute('aria-expanded', String(expanded));
+      content.setAttribute('aria-hidden', String(!expanded));
+      assistiveLabel.textContent = assistiveLabel.textContent.replace(expanded ? /^Show/ : /^Hide/, expanded ? 'Hide' : 'Show');
+    });
   }
 
   for (const form of document.querySelectorAll('[data-bulk-schedule-form]')) {

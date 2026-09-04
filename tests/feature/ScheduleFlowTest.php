@@ -73,6 +73,13 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertSame(55000, $webSchedule['items'][1]['start_offset_ms']);
         $this->assertSame(145000, $webSchedule['items'][1]['content_end_offset_ms']);
 
+        $directoryPage = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules');
+        $directoryPage->assertOK();
+        $directoryBody = $directoryPage->response()->getBody();
+        $this->assertStringContainsString('data-schedule-assets', $directoryBody);
+        $this->assertStringContainsString('aria-expanded="false"', $directoryBody);
+        $this->assertLessThan(strpos($directoryBody, 'Revision 1'), strpos($directoryBody, 'schedule-card-head-tools'));
+
         $device = (new DeviceModel())->find($fixture['device']->id);
         $this->assertSame(1, (int) $device->schedule_revision);
         $outbox = Database::connect()->table('outbox_events')->where('aggregate_id', $device->id)->orderBy('id', 'DESC')->get()->getRowArray();
