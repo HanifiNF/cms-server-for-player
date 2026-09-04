@@ -44,6 +44,7 @@ class ScheduleService
             $assetMetadata[(int) $asset->id] = [
                 'title' => $asset->title,
                 'filename' => $asset->filename,
+                'storageFilename' => basename(str_replace('\\', '/', (string) $asset->storage_key)),
                 'type' => $asset->asset_type ?: 'featured',
                 'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
                 'expiresOn' => $asset->expires_on?->format('Y-m-d'),
@@ -71,6 +72,7 @@ class ScheduleService
                     'assetId' => $item->asset_id !== null ? ($assetPublicIds[(int) $item->asset_id] ?? null) : null,
                     'title' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['title'] ?? $item->title) : $item->title,
                     'filename' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['filename'] ?? $item->filename) : $item->filename,
+                    'storageFilename' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['storageFilename'] ?? null) : null,
                     'source' => $item->source,
                     'durationMs' => $durationMs,
                     'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',

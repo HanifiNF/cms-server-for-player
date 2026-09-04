@@ -70,6 +70,7 @@ final class MediaLibraryTaxonomyTest extends CIUnitTestCase
         $devices = (new ScheduleService())->readyMediaByDevice();
         $this->assertSame('trailer', $devices[0]['media'][0]['type']);
         $this->assertSame(['Historical Epic'], $devices[0]['media'][0]['genres']);
+        $this->assertSame('mountain.ldg', $devices[0]['media'][0]['storageFilename']);
         $this->assertStringEndsWith('/control/assets/61000000-2222-4333-8444-555555555555/poster', $devices[0]['media'][0]['posterUrl']);
 
         $assetsPage = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/library');
