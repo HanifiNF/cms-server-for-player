@@ -13,3 +13,9 @@ Enhancement untuk sistem schedule
    ada 2 yang ku mau ubah pertama sistem search, sistem search ingin ku buat sangat advanced dan terletak di laman schedule cms server, yang ku ingin implementasikan tidak hanya search by title, studio, day/date, tapi aku ingin menambahkan filter yang sangat advance, seperti, admin dapat mencari schedule studio 1 lokasi bogor yang completed dan memutar film A pada hari tertentu, jadi saat memasuki laman schedule akan ada search bar diatas dengan bagian kanan merupakan dropdown-dropdown filter, dropdown yang aku masuki adalah, 1. location (dengan fitur dapat memilih studio dari lokasi terkait), 2. Asset (agak rumit, jika telah mmeilih lokasi di dropdown lokasi, maka dropdown asset akan menunjukan asset yang lokasi terkait punya, lalu dapat memilih lebih dari satu asset (select-type) ) untuk mencari schedule yang memiliki atau telah memutar asset terkait, 3. date/time (mem-filter beradasarkan tanggal dan waktu, untuk waktu bisakah dibagi menjadi 3 bagian, misal morning (00.01-09.00), Noon (09.01-15.00), Night(15.01-00.00)), 4. Type, hanya berisikan tipe schedule (completed, upcoming, active, etc). lalu fitur kedua setelah search filter, yaitu mempermudah dalam penghapusan atau peng-disable-an schedule, tambahkan button disable dan delete schedules, di dalam itu tambahkan search sistem sama persis seperti yang di laman schedule, bedanya adalah aku ingin admin dapat memilih lebih dari 1 schedule untuk dihapus, sama seperti asset assign.
 
 TOTAL DURASI dan semacamnya sangat penting, jadi hitung lebih teliti lagi untuk membuat fitur" ini
+
+1. schedule start film at di ilangin sama global gap
+2. list film di schedule art tambah pensil
+3. satu schedule bisa ada 2 atau lebih film yang sama
+4. ui schedule di player di tambahain
+5. title jadi tanggal buat schedule

@@ -282,6 +282,7 @@ class ScheduleService
                 $entry = [
                     'mediaKey' => $item['media_key'],
                     'title' => $item['title_snapshot'],
+                    'sourceDurationMs' => max(0, (int) $item['duration_override_ms']),
                     'durationMs' => max(0, (int) $item['duration_override_ms'] - (int) ($item['playback_start_offset_ms'] ?? 0)),
                     'startOffsetMs' => (int) ($item['playback_start_offset_ms'] ?? 0),
                     'gapAfterMs' => (int) ($item['gap_after_ms'] ?? 0),

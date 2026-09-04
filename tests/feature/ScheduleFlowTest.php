@@ -167,8 +167,10 @@ final class ScheduleFlowTest extends CIUnitTestCase
 
         $snapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])->get('/api/player/schedules');
         $playlist = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['schedules'][0]['playlist'];
+        $this->assertSame(60_000, $playlist[0]['sourceDurationMs']);
         $this->assertSame(50_000, $playlist[0]['durationMs']);
         $this->assertSame(10_000, $playlist[0]['startOffsetMs']);
+        $this->assertSame(90_000, $playlist[1]['sourceDurationMs']);
         $this->assertSame(60_000, $playlist[1]['durationMs']);
         $this->assertSame(30_000, $playlist[1]['startOffsetMs']);
 
