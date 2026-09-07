@@ -33,52 +33,47 @@ class ScheduleService
     public function readyMediaByDevice(): array
     {
         (new AssetExpiryService($this->db))->expireDue();
-        $assetPublicIds = [];
-        $activeAssetIds = [];
-        $catalogAssets = (new AssetModel())->findAll();
-        $genreMap = (new AssetTaxonomyService($this->db))->mapForAssets(array_map(static fn ($asset): int => (int) $asset->id, $catalogAssets));
-        $assetMetadata = [];
-        foreach ($catalogAssets as $asset) {
-            $assetPublicIds[(int) $asset->id] = $asset->public_id;
-            if ($asset->status === 'active') $activeAssetIds[(int) $asset->id] = true;
-            $assetMetadata[(int) $asset->id] = [
-                'title' => $asset->title,
-                'filename' => $asset->filename,
-                'storageFilename' => basename(str_replace('\\', '/', (string) $asset->storage_key)),
-                'type' => $asset->asset_type ?: 'featured',
-                'genres' => array_column($genreMap[(int) $asset->id] ?? [], 'name'),
-                'expiresOn' => $asset->expires_on?->format('Y-m-d'),
-                'posterUrl' => $asset->poster_storage_key
-                    ? site_url('control/assets/' . rawurlencode((string) $asset->public_id) . '/poster')
-                    : null,
-            ];
-        }
-
         $activeLocations = [];
         foreach ((new LocationModel())->where('status', 'active')->orderBy('name')->findAll() as $location) {
             $activeLocations[(int) $location->id] = $location;
         }
+        $devices = (new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll();
+        $devices = array_values(array_filter($devices, static fn (object $device): bool => $device->location_id === null || isset($activeLocations[(int) $device->location_id])));
+        $deviceIds = array_map(static fn (object $device): int => (int) $device->id, $devices);
+        $inventoryByDevice = [];
+        $managedAssetIds = [];
+        if ($deviceIds !== []) {
+            $rows = $this->db->table('device_assets da')
+                ->select('da.device_id, da.asset_id, da.media_key, da.source, da.title AS local_title, da.filename AS local_filename, da.duration_ms, a.public_id AS asset_public_id, a.title AS asset_title, a.filename AS asset_filename, a.storage_key, a.asset_type, a.expires_on, a.poster_storage_key, a.status AS asset_status')
+                ->join('assets a', 'a.id = da.asset_id', 'left')->whereIn('da.device_id', $deviceIds)
+                ->where('da.status', 'ready')->where('da.duration_ms >', 0)->where('da.media_key IS NOT NULL')
+                ->where('da.media_key !=', '')
+                ->orderBy('da.device_id')->orderBy('da.title')->get()->getResultArray();
+            foreach ($rows as $row) {
+                if ($row['asset_id'] !== null) {
+                    if ($row['asset_status'] !== 'active') continue;
+                    $managedAssetIds[] = (int) $row['asset_id'];
+                }
+                $inventoryByDevice[(int) $row['device_id']][] = $row;
+            }
+        }
+        $genreMap = (new AssetTaxonomyService($this->db))->mapForAssets(array_values(array_unique($managedAssetIds)));
         $result = [];
-        foreach ((new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll() as $device) {
-            if ($device->location_id !== null && ! isset($activeLocations[(int) $device->location_id])) continue;
+        foreach ($devices as $device) {
             $location = $device->location_id !== null ? ($activeLocations[(int) $device->location_id] ?? null) : null;
             $media = [];
-            foreach ((new DeviceAssetModel())->where('device_id', $device->id)->where('status', 'ready')->orderBy('title')->findAll() as $item) {
-                if ($item->asset_id !== null && ! isset($activeAssetIds[(int) $item->asset_id])) continue;
-                $durationMs = max(0, (int) $item->duration_ms);
-                if ($durationMs <= 0 || $item->media_key === null || $item->media_key === '') continue;
+            foreach ($inventoryByDevice[(int) $device->id] ?? [] as $item) {
+                $assetId = $item['asset_id'] === null ? null : (int) $item['asset_id'];
                 $media[] = [
-                    'mediaKey' => $item->media_key,
-                    'assetId' => $item->asset_id !== null ? ($assetPublicIds[(int) $item->asset_id] ?? null) : null,
-                    'title' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['title'] ?? $item->title) : $item->title,
-                    'filename' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['filename'] ?? $item->filename) : $item->filename,
-                    'storageFilename' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['storageFilename'] ?? null) : null,
-                    'source' => $item->source,
-                    'durationMs' => $durationMs,
-                    'type' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['type'] ?? 'featured') : 'local',
-                    'genres' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['genres'] ?? []) : [],
-                    'expiresOn' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['expiresOn'] ?? null) : null,
-                    'posterUrl' => $item->asset_id !== null ? ($assetMetadata[(int) $item->asset_id]['posterUrl'] ?? null) : null,
+                    'mediaKey' => $item['media_key'], 'assetId' => $item['asset_public_id'],
+                    'title' => $assetId !== null ? ($item['asset_title'] ?: $item['local_title']) : $item['local_title'],
+                    'filename' => $assetId !== null ? ($item['asset_filename'] ?: $item['local_filename']) : $item['local_filename'],
+                    'storageFilename' => $assetId !== null ? basename(str_replace('\\', '/', (string) $item['storage_key'])) : null,
+                    'source' => $item['source'], 'durationMs' => (int) $item['duration_ms'],
+                    'type' => $assetId !== null ? ($item['asset_type'] ?: 'featured') : 'local',
+                    'genres' => $assetId !== null ? array_column($genreMap[$assetId] ?? [], 'name') : [],
+                    'expiresOn' => $assetId !== null && $item['expires_on'] ? substr((string) $item['expires_on'], 0, 10) : null,
+                    'posterUrl' => $assetId !== null && $item['poster_storage_key'] ? site_url('control/assets/' . rawurlencode((string) $item['asset_public_id']) . '/poster') : null,
                 ];
             }
             $result[] = [
@@ -89,6 +84,36 @@ class ScheduleService
                 'locationCode' => $location?->code ?: '',
                 'timezone' => $device->timezone ?: 'Asia/Jakarta',
                 'media' => $media,
+            ];
+        }
+        return $result;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function scheduleTargetsForWeb(): array
+    {
+        $activeLocations = [];
+        foreach ((new LocationModel())->where('status', 'active')->orderBy('name')->findAll() as $location) $activeLocations[(int) $location->id] = $location;
+        $devices = (new DeviceModel())->where('status', 'active')->orderBy('location')->orderBy('name')->findAll();
+        $deviceIds = array_map(static fn (object $device): int => (int) $device->id, $devices);
+        $readyCounts = [];
+        if ($deviceIds !== []) foreach ($this->db->table('device_assets da')->select('da.device_id, COUNT(*) AS ready_count', false)
+            ->join('assets a', 'a.id = da.asset_id', 'left')->whereIn('da.device_id', $deviceIds)->where('da.status', 'ready')
+            ->where('da.duration_ms >', 0)->where('da.media_key IS NOT NULL')->where('da.media_key !=', '')
+            ->groupStart()->where('da.asset_id IS NULL')->orWhere('a.status', 'active')->groupEnd()
+            ->groupBy('da.device_id')->get()->getResultArray() as $row) {
+            $readyCounts[(int) $row['device_id']] = (int) $row['ready_count'];
+        }
+        $result = [];
+        foreach ($devices as $device) {
+            if ($device->location_id !== null && ! isset($activeLocations[(int) $device->location_id])) continue;
+            $location = $device->location_id === null ? null : $activeLocations[(int) $device->location_id];
+            $result[] = [
+                'id' => $device->public_id, 'name' => $device->name,
+                'location' => $location?->name ?: $device->location,
+                'locationId' => $location?->public_id ?: 'unassigned', 'locationCode' => $location?->code ?: '',
+                'timezone' => $device->timezone ?: 'Asia/Jakarta', 'readyCount' => $readyCounts[(int) $device->id] ?? 0,
+                'media' => [],
             ];
         }
         return $result;
@@ -390,7 +415,7 @@ class ScheduleService
         $expiryService->expireDue();
         $errors = [];
         $title = trim((string) ($input['title'] ?? ''));
-        if ($title === '' || mb_strlen($title) > 255) $errors['title'] = 'Title is required and must not exceed 255 characters.';
+        if ($title !== '' && mb_strlen($title) > 255) $errors['title'] = 'Title must not exceed 255 characters.';
 
         $requestedDeviceIds = is_array($input['device_ids'] ?? null) ? $input['device_ids'] : [];
         if ($requestedDeviceIds === [] && trim((string) ($input['device_id'] ?? '')) !== '') {
@@ -429,6 +454,8 @@ class ScheduleService
         $start = $this->parseLocalStart($startInput, $timezone);
         if ($start === null) {
             $errors['start_at'] = 'Choose a valid start date and time.';
+        } elseif ($title === '') {
+            $title = $this->automaticTitle($start);
         }
 
         $recurrenceType = strtolower(trim((string) ($input['recurrence'] ?? 'one_time')));
@@ -601,6 +628,24 @@ class ScheduleService
             'loop_enabled' => $loopEnabled,
             'items' => $items,
         ];
+    }
+
+    private function automaticTitle(DateTimeImmutable $start): string
+    {
+        $days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        $months = [
+            1 => 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+        ];
+
+        return sprintf(
+            '%s, %02d %s %04d · %s',
+            $days[(int) $start->format('w')],
+            (int) $start->format('j'),
+            $months[(int) $start->format('n')],
+            (int) $start->format('Y'),
+            $start->format('H:i'),
+        );
     }
 
     /** @param array<string, mixed> $data */

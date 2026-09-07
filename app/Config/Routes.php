@@ -66,6 +66,7 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('storage/(:segment)/delete', 'Web\StorageController::delete/$1');
     $routes->get('schedules', 'Web\ScheduleController::index');
     $routes->get('schedules/collection', 'Web\ScheduleController::collection');
+    $routes->get('schedules/editor-data', 'Web\ScheduleController::editorData');
     $routes->get('schedules/bulk-collection', 'Web\ScheduleController::bulkCollection');
     $routes->post('schedules', 'Web\ScheduleController::create');
     $routes->post('schedules/(:segment)/update', 'Web\ScheduleController::update/$1');

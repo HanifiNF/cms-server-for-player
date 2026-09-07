@@ -41,7 +41,7 @@ class ScheduleController extends BaseController
         }
         return view('web/schedules', [
             'title' => 'Schedules', 'active' => 'schedules', 'admin' => $this->admin(),
-            'devices' => $service->readyMediaByDevice(), 'schedules' => $directory['rows'],
+            'devices' => $service->scheduleTargetsForWeb(), 'schedules' => $directory['rows'],
             'scheduleDirectory' => $directory,
             'editing' => $editing,
         ]);
@@ -78,6 +78,11 @@ class ScheduleController extends BaseController
                 'totalAll' => (int) $directory['total_all'],
             ],
         ]);
+    }
+
+    public function editorData(): ResponseInterface
+    {
+        return $this->response->setJSON(['data' => ['devices' => (new ScheduleService())->readyMediaByDevice()]]);
     }
 
     public function bulkCollection(): ResponseInterface

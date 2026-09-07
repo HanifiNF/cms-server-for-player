@@ -30,9 +30,6 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $page = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules');
         $page->assertOK();
         $page->assertSee('Create a playback schedule');
-        $page->assertSee('Local Campaign');
-        $page->assertSee('Managed Campaign');
-        $page->assertDontSee('Missing Campaign');
         $page->assertSee('Select assets');
         $this->assertStringContainsString('id="mediaPickerList"', $page->response()->getBody());
         $this->assertStringNotContainsString('id="mediaPicker"', $page->response()->getBody());
@@ -42,6 +39,11 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $this->assertStringContainsString('playlist-compact-timeline', $page->response()->getBody());
         $this->assertStringContainsString('data-volume-input', $page->response()->getBody());
         $this->assertStringNotContainsString('data-volume-range', $page->response()->getBody());
+        $editorData = $this->withSession(['cms_web_user_id' => $fixture['adminId']])->get('/control/schedules/editor-data');
+        $editorData->assertOK();
+        $editorData->assertSee('Local Campaign');
+        $editorData->assertSee('Managed Campaign');
+        $editorData->assertDontSee('Missing Campaign');
 
         $created = $this->postForm('/control/schedules', [
             'title' => 'Jakarta Morning Playlist', 'device_id' => $fixture['device']->public_id,
@@ -158,6 +160,48 @@ final class ScheduleFlowTest extends CIUnitTestCase
         $playlist = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['schedules'][0]['playlist'];
         $this->assertSame(1_200_000, $playlist[0]['gapAfterMs']);
         $this->assertArrayNotHasKey('startTime', $playlist[1], 'No per-film start-time variable should be introduced.');
+    }
+
+    public function testWebScheduleGeneratesItsTitleAndKeepsRepeatedAssetsAsSeparateItems(): void
+    {
+        $fixture = $this->fixture();
+        $start = '2030-01-07T10:15:00';
+
+        $created = $this->postForm('/control/schedules', [
+            'device_id' => $fixture['device']->public_id,
+            'timezone' => 'Asia/Jakarta',
+            'start_at' => $start,
+            'media_keys' => [$fixture['localKey'], $fixture['localKey'], $fixture['localKey']],
+            'duration_ms' => [45_000, 45_000, 45_000],
+            'gap_after_ms' => [5_000, 10_000, 0],
+            'volume_percent' => [100, 75, 50],
+        ], $fixture['adminId']);
+        $created->assertRedirectTo('/control/schedules');
+
+        $schedule = (new ScheduleModel())->orderBy('id', 'DESC')->first();
+        $this->assertNotNull($schedule);
+        $this->assertSame('Senin, 07 Januari 2030 · 10:15', $schedule->title);
+
+        $items = Database::connect()->table('schedule_items')
+            ->where('schedule_id', $schedule->id)->orderBy('position')->get()->getResultArray();
+        $this->assertCount(3, $items);
+        $this->assertSame([0, 1, 2], array_map('intval', array_column($items, 'position')));
+        $this->assertSame(
+            [$fixture['localKey'], $fixture['localKey'], $fixture['localKey']],
+            array_column($items, 'media_key'),
+        );
+        $this->assertSame([100, 75, 50], array_map('intval', array_column($items, 'volume_percent')));
+
+        $snapshot = $this->withHeaders(['Authorization' => 'Bearer ' . $fixture['token']])
+            ->get('/api/player/schedules');
+        $snapshot->assertOK();
+        $payload = json_decode($snapshot->response()->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['schedules'][0];
+        $this->assertSame('Senin, 07 Januari 2030 · 10:15', $payload['title']);
+        $this->assertCount(3, $payload['playlist']);
+        $this->assertSame(
+            [$fixture['localKey'], $fixture['localKey'], $fixture['localKey']],
+            array_column($payload['playlist'], 'mediaKey'),
+        );
     }
 
     public function testFilmPlaybackStartOffsetControlsTimelineAndPlayerSeekContract(): void

@@ -76,6 +76,7 @@
 .asset-selection-card{display:flex;min-height:0;flex-direction:column}
 .media-picker-filters{grid-template-columns:minmax(220px,1fr) minmax(120px,.45fr) minmax(120px,.45fr);margin-bottom:10px}
 .media-picker-list{display:grid;align-content:start;gap:8px;max-height:430px;overflow:auto;padding:1px 5px 1px 1px;scrollbar-gutter:stable}
+.media-choice-card,.playlist-row,.playlist-gap-divider{content-visibility:auto;contain-intrinsic-size:auto 88px}
 .media-choice-card{display:grid;grid-template-columns:58px minmax(0,1fr) auto;align-items:center;gap:11px;min-width:0;padding:9px;border:1px solid var(--line);border-radius:11px;background:var(--surface);transition:border-color .15s ease,background .15s ease}
 .media-choice-card:hover{border-color:#e4aaa8}.media-choice-card.selected{border-color:#d9b5b2;background:#fff7f6}
 .media-choice-poster{position:relative;display:grid;width:58px;height:74px;overflow:hidden;place-items:center;border-radius:8px;background:linear-gradient(145deg,#eadfda,#f8f1ed);color:var(--red);font-size:20px;font-weight:900}
