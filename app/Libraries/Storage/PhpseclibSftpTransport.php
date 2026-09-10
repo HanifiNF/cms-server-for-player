@@ -34,13 +34,15 @@ final class PhpseclibSftpTransport implements FtpsTransportInterface
         return is_int($size) && $size >= 0 ? $size : null;
     }
 
-    public function upload(string $sourcePath, string $remotePath, int $offset): void
+    public function upload(string $sourcePath, string $remotePath, int $offset, ?callable $progress = null): void
     {
         $directory = str_replace('\\', '/', dirname($remotePath));
         if (! $this->sftp->is_dir($directory) && ! $this->sftp->mkdir($directory, -1, true)) {
             throw new RuntimeException('SFTP could not create the remote object directory.');
         }
-        if (! $this->sftp->put($remotePath, $sourcePath, SFTP::SOURCE_LOCAL_FILE, $offset, $offset)) {
+        $total = filesize($sourcePath);
+        $callback = $progress === null || $total === false ? null : static fn (int $sent) => $progress(min($total, $offset + $sent), $total);
+        if (! $this->sftp->put($remotePath, $sourcePath, SFTP::SOURCE_LOCAL_FILE, $offset, $offset, $callback)) {
             throw new RuntimeException('SFTP upload failed: ' . $this->lastError());
         }
     }

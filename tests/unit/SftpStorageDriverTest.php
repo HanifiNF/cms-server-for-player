@@ -94,11 +94,12 @@ final class MemorySftpTransport implements FtpsTransportInterface
     /** @var list<string> */
     public array $deletedDirectories = [];
     public function size(string $remotePath): ?int { return isset($this->objects[$remotePath]) ? strlen($this->objects[$remotePath]) : null; }
-    public function upload(string $sourcePath, string $remotePath, int $offset): void
+    public function upload(string $sourcePath, string $remotePath, int $offset, ?callable $progress = null): void
     {
         $source = file_get_contents($sourcePath);
         if ($source === false) throw new RuntimeException('Test source read failed.');
         $this->objects[$remotePath] = substr((string) ($this->objects[$remotePath] ?? ''), 0, $offset) . substr($source, $offset);
+        if ($progress !== null) $progress(strlen($source), strlen($source));
     }
     public function download(string $remotePath, string $destinationPath, int $offset): void
     {

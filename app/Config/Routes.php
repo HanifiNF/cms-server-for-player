@@ -84,6 +84,12 @@ $routes->group('control', ['filter' => 'web-assets'], static function (RouteColl
     $routes->get('library/(:segment)/versions/collection', 'Web\MediaLibraryController::versionCollection/$1');
     $routes->get('library/(:segment)/schedules/collection', 'Web\MediaLibraryController::scheduleCollection/$1');
     $routes->post('assets/upload', 'Web\AssetController::upload');
+    $routes->post('assets/uploads', 'Web\MediaUploadController::initiate');
+    $routes->get('assets/uploads', 'Web\MediaUploadController::token');
+    $routes->get('assets/uploads/(:segment)', 'Web\MediaUploadController::status/$1');
+    $routes->post('assets/uploads/(:segment)/chunks', 'Web\MediaUploadController::chunk/$1');
+    $routes->post('assets/uploads/(:segment)/finalize', 'Web\MediaUploadController::finalize/$1');
+    $routes->post('assets/uploads/(:segment)/cancel', 'Web\MediaUploadController::cancel/$1');
     $routes->get('assets/(:segment)/poster', 'Web\AssetController::poster/$1');
     $routes->post('assets/(:segment)/metadata', 'Web\AssetController::updateMetadata/$1');
     $routes->post('assets/(:segment)/resubmit', 'Web\AssetController::resubmit/$1');

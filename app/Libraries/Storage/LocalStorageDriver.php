@@ -18,7 +18,7 @@ final class LocalStorageDriver implements StorageDriverInterface
         $this->root = rtrim(WRITEPATH, '\\/') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeRoot);
     }
 
-    public function putFile(string $sourcePath, string $key): void
+    public function putFile(string $sourcePath, string $key, ?callable $progress = null): void
     {
         if (! is_file($sourcePath)) throw new RuntimeException('The source file for storage was not found.');
         $destination = $this->path($key);
@@ -27,7 +27,41 @@ final class LocalStorageDriver implements StorageDriverInterface
             throw new RuntimeException('The storage directory could not be created.');
         }
         $temporary = $destination . '.upload-' . bin2hex(random_bytes(6));
-        if (! copy($sourcePath, $temporary)) throw new RuntimeException('The file could not be written to local storage.');
+        $input = fopen($sourcePath, 'rb');
+        $output = fopen($temporary, 'wb');
+        $total = filesize($sourcePath);
+        if ($input === false || $output === false || $total === false) {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+            @unlink($temporary);
+            throw new RuntimeException('The file could not be opened for local storage.');
+        }
+        $copied = 0;
+        if ($progress !== null) $progress(0, $total);
+        try {
+            while (! feof($input)) {
+                $bytes = fread($input, 8388608);
+                if ($bytes === false) throw new RuntimeException('The local storage source could not be read.');
+                if ($bytes === '') break;
+                $offset = 0;
+                while ($offset < strlen($bytes)) {
+                    $written = fwrite($output, substr($bytes, $offset));
+                    if ($written === false || $written === 0) throw new RuntimeException('The file could not be written to local storage.');
+                    $offset += $written;
+                }
+                $copied += strlen($bytes);
+                if ($progress !== null) $progress(min($copied, $total), $total);
+            }
+            if (! fflush($output) || $copied !== $total) throw new RuntimeException('The file could not be written completely to local storage.');
+        } catch (\Throwable $error) {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+            @unlink($temporary);
+            throw $error;
+        } finally {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+        }
         if (is_file($destination) && ! @unlink($destination)) {
             @unlink($temporary);
             throw new RuntimeException('The existing storage object could not be replaced.');

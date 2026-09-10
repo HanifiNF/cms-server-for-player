@@ -67,7 +67,7 @@ final class SftpStorageDriver implements StorageDriverInterface
         return 'SHA256:' . rtrim(base64_encode(hash('sha256', $blob, true)), '=');
     }
 
-    public function putFile(string $sourcePath, string $key): void { $this->delegate->putFile($sourcePath, $key); }
+    public function putFile(string $sourcePath, string $key, ?callable $progress = null): void { $this->delegate->putFile($sourcePath, $key, $progress); }
     public function materialize(string $key): ?string { return $this->delegate->materialize($key); }
     public function exists(string $key): bool { return $this->delegate->exists($key); }
     public function delete(string $key): void { $this->delegate->delete($key); }

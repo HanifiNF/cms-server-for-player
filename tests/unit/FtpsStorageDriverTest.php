@@ -107,12 +107,13 @@ final class MemoryFtpsTransport implements FtpsTransportInterface
 
     public function size(string $remotePath): ?int { return array_key_exists($remotePath, $this->objects) ? strlen($this->objects[$remotePath]) : null; }
 
-    public function upload(string $sourcePath, string $remotePath, int $offset): void
+    public function upload(string $sourcePath, string $remotePath, int $offset, ?callable $progress = null): void
     {
         $this->uploadOffsets[] = $offset;
         $source = file_get_contents($sourcePath);
         if ($source === false) throw new RuntimeException('Fake source read failed.');
         $this->objects[$remotePath] = substr((string) ($this->objects[$remotePath] ?? ''), 0, $offset) . substr($source, $offset);
+        if ($progress !== null) $progress(strlen($source), strlen($source));
     }
 
     public function download(string $remotePath, string $destinationPath, int $offset): void

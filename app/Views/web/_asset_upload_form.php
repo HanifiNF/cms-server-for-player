@@ -1,4 +1,4 @@
-<form method="post" action="<?= site_url('control/assets/upload') ?>" enctype="multipart/form-data" class="form-stack library-upload-form" data-asset-upload-form>
+<form method="post" action="<?= site_url('control/assets/upload') ?>" enctype="multipart/form-data" class="form-stack library-upload-form" data-asset-upload-form data-resumable-upload-form data-upload-purpose="asset" data-upload-base="<?= site_url('control/assets/uploads') ?>">
   <?= csrf_field() ?>
   <label>Media file<input type="file" name="media" accept="video/*,.mkv,.ts" required data-upload-file></label>
   <div class="film-field-pair"><label>Title <span class="muted">(optional)</span><input type="text" name="title" maxlength="255" value="<?= esc(old('title')) ?>" placeholder="Uses the filename when empty"></label><label>Asset type<select name="asset_type" required><?php foreach ($assetTypes as $type): ?><option value="<?= esc($type) ?>" <?= old('asset_type', 'featured') === $type ? 'selected' : '' ?>><?= esc(ucfirst($type)) ?></option><?php endforeach ?></select></label></div>

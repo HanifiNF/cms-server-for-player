@@ -22,15 +22,18 @@ class LdgCryptoService
         $this->config = $config ?? config(Ldg::class);
     }
 
-    /** @return array<string, int|string> */
-    public function encryptFile(string $sourcePath, string $destinationPath, string $assetPublicId, int $revision): array
+    /**
+     * @param callable(string,int,int):void|null $progress
+     * @return array<string, int|string>
+     */
+    public function encryptFile(string $sourcePath, string $destinationPath, string $assetPublicId, int $revision, ?callable $progress = null): array
     {
         if (! is_file($sourcePath)) throw new RuntimeException('The plaintext media file was not found.');
         $plaintextSize = filesize($sourcePath);
-        $plaintextSha = hash_file('sha256', $sourcePath);
-        if ($plaintextSize === false || $plaintextSize <= 0 || $plaintextSha === false) {
+        if ($plaintextSize === false || $plaintextSize <= 0) {
             throw new RuntimeException('The plaintext media file could not be inspected.');
         }
+        $plaintextSha = $this->hashFileWithProgress($sourcePath, $plaintextSize, $progress);
 
         $dek = random_bytes(32);
         $noncePrefix = random_bytes(8);
@@ -61,6 +64,8 @@ class LdgCryptoService
             $this->writeAll($output, $header);
             hash_update($cipherHash, $header);
             $index = 0;
+            $processed = 0;
+            if ($progress !== null) $progress('encrypting', 0, $plaintextSize);
             while (! feof($input)) {
                 $plain = fread($input, $chunkSize);
                 if ($plain === false) throw new RuntimeException('Plaintext media read failed.');
@@ -75,6 +80,8 @@ class LdgCryptoService
                 $this->writeAll($output, $record);
                 hash_update($cipherHash, $record);
                 $index++;
+                $processed += strlen($plain);
+                if ($progress !== null) $progress('encrypting', min($processed, $plaintextSize), $plaintextSize);
             }
             if (! fflush($output)) throw new RuntimeException('Encrypted media flush failed.');
         } catch (Throwable $error) {
@@ -108,6 +115,29 @@ class LdgCryptoService
             'key_version' => 1,
             'encryption_revision' => $revision,
         ];
+    }
+
+    /** @param callable(string,int,int):void|null $progress */
+    private function hashFileWithProgress(string $path, int $total, ?callable $progress): string
+    {
+        $stream = fopen($path, 'rb');
+        if ($stream === false) throw new RuntimeException('The plaintext media file could not be opened for verification.');
+        $context = hash_init('sha256');
+        $processed = 0;
+        if ($progress !== null) $progress('hashing', 0, $total);
+        try {
+            while (! feof($stream)) {
+                $bytes = fread($stream, 8388608);
+                if ($bytes === false) throw new RuntimeException('Plaintext media verification read failed.');
+                if ($bytes === '') break;
+                hash_update($context, $bytes);
+                $processed += strlen($bytes);
+                if ($progress !== null) $progress('hashing', min($processed, $total), $total);
+            }
+        } finally {
+            fclose($stream);
+        }
+        return hash_final($context);
     }
 
     /** @return array<string, string> */

@@ -29,7 +29,7 @@ final class CurlFtpsTransport implements FtpsTransportInterface
         return is_int($size) && $size >= 0 ? $size : null;
     }
 
-    public function upload(string $sourcePath, string $remotePath, int $offset): void
+    public function upload(string $sourcePath, string $remotePath, int $offset, ?callable $progress = null): void
     {
         $totalSize = filesize($sourcePath);
         if ($totalSize === false || $offset < 0 || $offset > $totalSize) throw new RuntimeException('The FTPS upload source or resume offset is invalid.');
@@ -38,13 +38,21 @@ final class CurlFtpsTransport implements FtpsTransportInterface
             if (is_resource($stream)) fclose($stream);
             throw new RuntimeException('The FTPS upload source could not be opened.');
         }
-        $handle = $this->handle($remotePath, [
+        $options = [
             CURLOPT_UPLOAD => true,
             CURLOPT_INFILE => $stream,
             CURLOPT_INFILESIZE_LARGE => $totalSize - $offset,
             CURLOPT_RESUME_FROM => $offset,
             CURLOPT_FTP_CREATE_MISSING_DIRS => CURLFTP_CREATE_DIR_RETRY,
-        ]);
+        ];
+        if ($progress !== null) {
+            $options[CURLOPT_NOPROGRESS] = false;
+            $options[CURLOPT_XFERINFOFUNCTION] = static function ($handle, float $downloadTotal, float $downloaded, float $uploadTotal, float $uploaded) use ($progress, $offset, $totalSize): int {
+                $progress(min($totalSize, $offset + (int) $uploaded), $totalSize);
+                return 0;
+            };
+        }
+        $handle = $this->handle($remotePath, $options);
         try {
             $this->execute($handle, 'FTPS upload failed');
         } finally {

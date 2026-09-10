@@ -62,7 +62,7 @@ final class FtpsStorageDriver implements StorageDriverInterface
         ];
     }
 
-    public function putFile(string $sourcePath, string $key): void
+    public function putFile(string $sourcePath, string $key, ?callable $progress = null): void
     {
         if (! is_file($sourcePath)) throw new RuntimeException('The source file for FTPS storage was not found.');
         $size = filesize($sourcePath);
@@ -70,11 +70,18 @@ final class FtpsStorageDriver implements StorageDriverInterface
         $remote = $this->remotePath($key);
         $temporary = $remote . '.part';
         $offset = $this->transport->size($temporary) ?? 0;
+        $workTotal = $size * 2;
+        if ($progress !== null) $progress(min($offset, $size), $workTotal);
         if ($offset > $size) {
             $this->transport->delete($temporary);
             $offset = 0;
         }
-        if ($offset < $size) $this->transport->upload($sourcePath, $temporary, $offset);
+        if ($offset < $size) $this->transport->upload(
+            $sourcePath,
+            $temporary,
+            $offset,
+            $progress === null ? null : static fn (int $sent, int $total) => $progress(min($sent, $size), $workTotal),
+        );
         if ($this->transport->size($temporary) !== $size) throw new RuntimeException('FTPS upload verification failed because the remote size differs from the source.');
         try {
             $this->transport->rename($temporary, $remote);
@@ -84,7 +91,11 @@ final class FtpsStorageDriver implements StorageDriverInterface
             $this->transport->rename($temporary, $remote);
         }
         if ($this->transport->size($remote) !== $size) throw new RuntimeException('FTPS publish verification failed.');
-        $this->seedCache($sourcePath, $key);
+        $this->seedCache(
+            $sourcePath,
+            $key,
+            $progress === null ? null : static fn (int $copied, int $total) => $progress($size + min($copied, $size), $workTotal),
+        );
     }
 
     public function materialize(string $key): ?string
@@ -201,13 +212,48 @@ final class FtpsStorageDriver implements StorageDriverInterface
         return WRITEPATH . 'storage-cache' . DIRECTORY_SEPARATOR . $this->config['_profile_id'] . DIRECTORY_SEPARATOR . $name;
     }
 
-    private function seedCache(string $sourcePath, string $key): void
+    /** @param callable(int,int):void|null $progress */
+    private function seedCache(string $sourcePath, string $key, ?callable $progress = null): void
     {
         $path = $this->cachePath($key);
         $directory = dirname($path);
         if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) throw new RuntimeException('The FTPS cache directory could not be created.');
         $temporary = $path . '.seed-' . bin2hex(random_bytes(5));
-        if (! copy($sourcePath, $temporary)) throw new RuntimeException('The uploaded FTPS object could not be seeded into the CMS cache.');
+        $input = fopen($sourcePath, 'rb');
+        $output = fopen($temporary, 'wb');
+        $total = filesize($sourcePath);
+        if ($input === false || $output === false || $total === false) {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+            @unlink($temporary);
+            throw new RuntimeException('The uploaded FTPS object could not be opened for CMS cache seeding.');
+        }
+        $copied = 0;
+        if ($progress !== null) $progress(0, $total);
+        try {
+            while (! feof($input)) {
+                $bytes = fread($input, 8388608);
+                if ($bytes === false) throw new RuntimeException('The FTPS cache seed source could not be read.');
+                if ($bytes === '') break;
+                $offset = 0;
+                while ($offset < strlen($bytes)) {
+                    $written = fwrite($output, substr($bytes, $offset));
+                    if ($written === false || $written === 0) throw new RuntimeException('The uploaded FTPS object could not be seeded into the CMS cache.');
+                    $offset += $written;
+                }
+                $copied += strlen($bytes);
+                if ($progress !== null) $progress(min($copied, $total), $total);
+            }
+            if (! fflush($output) || $copied !== $total) throw new RuntimeException('The uploaded FTPS object could not be seeded completely into the CMS cache.');
+        } catch (Throwable $error) {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+            @unlink($temporary);
+            throw $error;
+        } finally {
+            if (is_resource($input)) fclose($input);
+            if (is_resource($output)) fclose($output);
+        }
         if (is_file($path)) @unlink($path);
         if (! rename($temporary, $path)) { @unlink($temporary); throw new RuntimeException('The FTPS cache seed could not be finalized.'); }
         $this->cleanupCache($path);

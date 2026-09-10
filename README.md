@@ -279,10 +279,10 @@ The manifest exposes relative download URLs so Players can use the LAN or
 public CMS hostname they were paired with. Downloads are allowed only for a
 Player that has the specific asset assignment. Uploaded files are stored below
 `writable/uploads/assets`, while posters are stored below
-`writable/uploads/posters`; both are outside the public web root. Set PHP
-`upload_max_filesize` and `post_max_size` above the largest film size before
-uploading production media. Production traffic and license delivery must use
-HTTPS.
+`writable/uploads/posters`; both are outside the public web root. Film uploads
+use bounded resumable requests, so PHP only needs the per-chunk limits described
+below rather than a limit larger than the whole film. Production traffic and
+license delivery must use HTTPS.
 
 Authenticated media downloads support single HTTP byte ranges over HTTP or
 HTTPS. The endpoint returns `Accept-Ranges: bytes`, strong SHA-256 `ETag`
@@ -297,15 +297,28 @@ is not available on the CMS process PATH. If server-side probing is unavailable,
 the asset remains marked **Detecting…** and the first assigned Player that
 downloads and verifies the file reports the duration back to the catalog.
 
-The Assets upload form submits with upload progress feedback: percentage,
-transferred bytes, current throughput, and estimated time remaining. After the
-network transfer reaches 100%, the UI switches to **Encrypting media as LDG…**
-while the CMS probes duration, encrypts bounded chunks, hashes the ciphertext,
-and commits its database record. Plaintext is never moved into the asset storage
-directory. Operators can cancel only during the network-transfer phase. This is
-currently a single-request upload; production must set suitable PHP/Apache
-timeouts, and interrupted browser uploads restart from zero until resumable
-chunk uploads or a background upload worker is added.
+The Assets upload and replacement-revision forms use resumable 64 MiB network
+chunks. Progress reports percentage, transferred bytes, throughput, and ETA.
+Each chunk is verified with SHA-256 and committed in order; an interrupted
+upload can resume after the operator selects the same file again. Inactive
+sessions and their plaintext staging files expire after 24 hours. Run
+`php spark uploads:cleanup` periodically (for example, with Windows Task
+Scheduler) in addition to the opportunistic cleanup performed by upload traffic.
+
+After the network transfer reaches 100%, the UI switches to a separate processing
+progress bar with the active stage, processed bytes, percentage, and estimated
+time remaining. A one-shot CLI worker probes duration, verifies the plaintext,
+encrypts bounded LDG chunks, stores the result, and atomically commits the catalog
+record. The worker continues if the browser is refreshed or closed, and this also
+keeps progress polling responsive when the CMS uses `php spark serve`. The CMS
+normally discovers the matching PHP CLI automatically; when the web server uses a
+different PHP installation, set `media.workerPhpPath` in `.env` to the absolute
+`php.exe`/`php` path. Plaintext is never moved into the asset storage directory.
+Configure PHP with
+`upload_max_filesize=65M` and `post_max_size=70M`; the total film size is limited
+by available 64-bit addressable storage rather than the per-request PHP limit.
+The CMS reserves enough free space for the remaining plaintext upload, LDG
+staging/finalization, and a 2 GiB safety margin before accepting a session.
 
 Asset lifecycle actions are intentionally separate:
 

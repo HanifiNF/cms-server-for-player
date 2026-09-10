@@ -31,9 +31,10 @@ final class StorageManager
         return $profile ?? $this->defaultProfile();
     }
 
-    public function putFile(object $profile, string $sourcePath, string $key): void
+    /** @param callable(int,int):void|null $progress */
+    public function putFile(object $profile, string $sourcePath, string $key, ?callable $progress = null): void
     {
-        $this->driver($profile)->putFile($sourcePath, $key);
+        $this->driver($profile)->putFile($sourcePath, $key, $progress);
     }
 
     public function materialize(object $profile, string $key): ?string

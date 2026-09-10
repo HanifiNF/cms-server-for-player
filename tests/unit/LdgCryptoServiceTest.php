@@ -23,16 +23,21 @@ final class LdgCryptoServiceTest extends CIUnitTestCase
         $assetId = '12345678-1234-4234-8234-1234567890ab';
         $deviceId = '87654321-4321-4432-8432-ba0987654321';
         $token = 'phpunit-player-token';
+        $progress = [];
 
         try {
             $service = new LdgCryptoService($config);
-            $values = $service->encryptFile($source, $destination, $assetId, 3);
+            $values = $service->encryptFile($source, $destination, $assetId, 3, static function (string $stage, int $processed, int $total) use (&$progress): void {
+                $progress[$stage][] = [$processed, $total];
+            });
             $this->assertSame('ldg-v1', $values['encryption_format']);
             $this->assertSame(strlen($plaintext), $values['plaintext_size_bytes']);
             $this->assertSame(hash('sha256', $plaintext), $values['plaintext_sha256']);
             $this->assertSame(hash_file('sha256', $destination), $values['sha256']);
             $this->assertSame('LDG1', file_get_contents($destination, false, null, 0, 4));
             $this->assertStringNotContainsString(substr($plaintext, 0, 64), file_get_contents($destination));
+            $this->assertSame(strlen($plaintext), $progress['hashing'][array_key_last($progress['hashing'])][0]);
+            $this->assertSame(strlen($plaintext), $progress['encrypting'][array_key_last($progress['encrypting'])][0]);
 
             $dek = openssl_decrypt(
                 base64_decode((string) $values['wrapped_dek']), 'aes-256-gcm', $masterKey,
