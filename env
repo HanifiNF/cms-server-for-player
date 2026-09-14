@@ -79,7 +79,7 @@ cms.enrollmentTtlMinutes = 15
 # php -r "echo base64_encode(random_bytes(32)), PHP_EOL;"
 
 ldg.masterKey = 'dbKdjeBoSPlcUufenZfE4TxbzUhHTcVDfBllG8NvfxA='
-ldg.chunkSize = 4194304
+ldg.chunkSize = 16777216
 ldg.licenseHours = 24
 
 # Storage credential encryption. Generate a separate key with:

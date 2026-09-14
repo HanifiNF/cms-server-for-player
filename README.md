@@ -54,7 +54,7 @@ database.default.schema = public
 cms.adminApiKey = a_long_random_admin_secret
 cms.enrollmentPepper = a_different_random_secret_with_at_least_32_characters
 ldg.masterKey = base64_encoded_random_32_byte_key
-ldg.chunkSize = 4194304
+ldg.chunkSize = 16777216
 ldg.licenseHours = 24
 ```
 

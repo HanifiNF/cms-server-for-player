@@ -14,6 +14,7 @@ class LdgCryptoService
     public const HEADER_SIZE = 128;
     private const HEADER_CORE_SIZE = 80;
     private const TAG_SIZE = 16;
+    private const HASH_STREAM_BLOCK_SIZE = 67108864;
 
     private Ldg $config;
 
@@ -33,7 +34,9 @@ class LdgCryptoService
         if ($plaintextSize === false || $plaintextSize <= 0) {
             throw new RuntimeException('The plaintext media file could not be inspected.');
         }
+        $hashStartedAt = microtime(true);
         $plaintextSha = $this->hashFileWithProgress($sourcePath, $plaintextSize, $progress);
+        $hashDuration = microtime(true) - $hashStartedAt;
 
         $dek = random_bytes(32);
         $noncePrefix = random_bytes(8);
@@ -60,6 +63,7 @@ class LdgCryptoService
         }
 
         $cipherHash = hash_init('sha256');
+        $encryptionStartedAt = microtime(true);
         try {
             $this->writeAll($output, $header);
             hash_update($cipherHash, $header);
@@ -76,9 +80,10 @@ class LdgCryptoService
                 $tag = '';
                 $ciphertext = openssl_encrypt($plain, 'aes-256-gcm', $dek, OPENSSL_RAW_DATA, $nonce, $tag, $aad, self::TAG_SIZE);
                 if ($ciphertext === false || strlen($tag) !== self::TAG_SIZE) throw new RuntimeException('Media encryption failed.');
-                $record = $ciphertext . $tag;
-                $this->writeAll($output, $record);
-                hash_update($cipherHash, $record);
+                $this->writeAll($output, $ciphertext);
+                $this->writeAll($output, $tag);
+                hash_update($cipherHash, $ciphertext);
+                hash_update($cipherHash, $tag);
                 $index++;
                 $processed += strlen($plain);
                 if ($progress !== null) $progress('encrypting', min($processed, $plaintextSize), $plaintextSize);
@@ -92,6 +97,7 @@ class LdgCryptoService
         }
         fclose($input);
         fclose($output);
+        $encryptionDuration = microtime(true) - $encryptionStartedAt;
 
         $storedSize = filesize($destinationPath);
         if ($storedSize === false || $storedSize <= self::HEADER_SIZE) {
@@ -101,6 +107,21 @@ class LdgCryptoService
         $wrapped = $this->wrapMasterKey($dek, $assetPublicId, $revision);
         $dek = str_repeat("\0", strlen($dek));
         unset($dek);
+
+        log_message(
+            'info',
+            'LDG encryption performance asset={asset} revision={revision} bytes={bytes} chunk_bytes={chunkBytes} hashing_seconds={hashSeconds} hashing_mib_per_second={hashRate} encryption_seconds={encryptionSeconds} encryption_mib_per_second={encryptionRate}',
+            [
+                'asset' => $assetPublicId,
+                'revision' => $revision,
+                'bytes' => $plaintextSize,
+                'chunkBytes' => $chunkSize,
+                'hashSeconds' => number_format($hashDuration, 3, '.', ''),
+                'hashRate' => number_format($this->mibPerSecond($plaintextSize, $hashDuration), 2, '.', ''),
+                'encryptionSeconds' => number_format($encryptionDuration, 3, '.', ''),
+                'encryptionRate' => number_format($this->mibPerSecond($plaintextSize, $encryptionDuration), 2, '.', ''),
+            ],
+        );
 
         return [
             'encryption_format' => self::FORMAT,
@@ -126,18 +147,22 @@ class LdgCryptoService
         $processed = 0;
         if ($progress !== null) $progress('hashing', 0, $total);
         try {
-            while (! feof($stream)) {
-                $bytes = fread($stream, 8388608);
-                if ($bytes === false) throw new RuntimeException('Plaintext media verification read failed.');
-                if ($bytes === '') break;
-                hash_update($context, $bytes);
-                $processed += strlen($bytes);
+            while ($processed < $total) {
+                $remaining = $total - $processed;
+                $read = hash_update_stream($context, $stream, min(self::HASH_STREAM_BLOCK_SIZE, $remaining));
+                if (! is_int($read) || $read <= 0) throw new RuntimeException('Plaintext media verification read failed.');
+                $processed += $read;
                 if ($progress !== null) $progress('hashing', min($processed, $total), $total);
             }
         } finally {
             fclose($stream);
         }
         return hash_final($context);
+    }
+
+    private function mibPerSecond(int $bytes, float $seconds): float
+    {
+        return $seconds > 0.0 ? ($bytes / 1048576) / $seconds : 0.0;
     }
 
     /** @return array<string, string> */

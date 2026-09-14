@@ -7,6 +7,43 @@ use Config\Ldg;
 /** @internal */
 final class LdgCryptoServiceTest extends CIUnitTestCase
 {
+    public function testSixteenMiBChunkProducesCompatiblePartialFinalChunk(): void
+    {
+        $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cms-ldg-16m-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0775, true);
+        $source = $directory . DIRECTORY_SEPARATOR . 'source.mp4';
+        $destination = $directory . DIRECTORY_SEPARATOR . 'asset.ldg';
+        $plaintext = random_bytes(1048576 + 37);
+        file_put_contents($source, $plaintext);
+        $masterKey = random_bytes(32);
+        $config = new Ldg();
+        $config->masterKey = base64_encode($masterKey);
+        $config->chunkSize = 16777216;
+        $assetId = '12345678-1234-4234-8234-1234567890ab';
+
+        try {
+            $service = new LdgCryptoService($config);
+            $values = $service->encryptFile($source, $destination, $assetId, 1);
+            $header = file_get_contents($destination, false, null, 0, 128);
+            $this->assertIsString($header);
+            $this->assertSame(16777216, unpack('Nvalue', substr($header, 8, 4))['value']);
+            $this->assertSame(16777216, $values['ldg_chunk_size']);
+            $this->assertSame(128 + strlen($plaintext) + 16, $values['size_bytes']);
+
+            $dek = openssl_decrypt(
+                base64_decode((string) $values['wrapped_dek']), 'aes-256-gcm', $masterKey,
+                OPENSSL_RAW_DATA, base64_decode((string) $values['dek_nonce']),
+                base64_decode((string) $values['dek_tag']), "ldg-master-v1|{$assetId}|1",
+            );
+            $this->assertIsString($dek);
+            $this->assertSame($plaintext, $this->decryptContainer($destination, $dek));
+        } finally {
+            if (is_file($source)) unlink($source);
+            if (is_file($destination)) unlink($destination);
+            if (is_dir($directory)) rmdir($directory);
+        }
+    }
+
     public function testStreamingContainerAndDeviceLicenseRoundTrip(): void
     {
         $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cms-ldg-' . bin2hex(random_bytes(6));

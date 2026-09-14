@@ -4,6 +4,8 @@ namespace App\Libraries;
 
 final class MediaProcessingProgress
 {
+    private const WRITE_INTERVAL_SECONDS = 1.0;
+
     /** @var array<string,array{0:float,1:float}> */
     private const RANGES = [
         'probing' => [0.0, 2.0],
@@ -27,7 +29,7 @@ final class MediaProcessingProgress
         $ratio = $total > 0 ? max(0.0, min(1.0, $processed / $total)) : 0.0;
         $percent = $start + (($end - $start) * $ratio);
         $now = microtime(true);
-        if (! $force && $stage === $this->lastStage && $processed < $total && $now - $this->lastWrite < 0.25) return;
+        if (! $force && $stage === $this->lastStage && $processed < $total && $now - $this->lastWrite < self::WRITE_INTERVAL_SECONDS) return;
         $this->uploads->updateProgress($this->session, $stage, $processed, $total, $percent);
         $this->lastStage = $stage;
         $this->lastWrite = $now;
