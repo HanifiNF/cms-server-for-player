@@ -38,7 +38,7 @@ final class ResumableUploadService
             throw new RuntimeException('Upload service limits are invalid.');
         }
         $this->sessions = $sessions ?? new MediaUploadSessionModel();
-        $this->directory = rtrim($directory ?? WRITEPATH . 'upload-staging', '\\/');
+        $this->directory = rtrim($directory ?? (new MediaWorkspaceService())->path('upload_staging'), '\\/');
         $this->chunkSize = $chunkSize;
         $this->ttlSeconds = $ttlSeconds;
         $this->diskReserveBytes = $diskReserveBytes;

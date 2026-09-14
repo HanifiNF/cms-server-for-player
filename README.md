@@ -255,6 +255,11 @@ within its license window.
 
 Administrators distribute approved films from **Control Center → Assets**:
 
+Server-side media scratch space can be moved to an attached SSD or persistent
+production volume from **Control Center → Storage → Configure Workspace**. See
+[`docs/MEDIA_WORKSPACE_SETUP.md`](docs/MEDIA_WORKSPACE_SETUP.md) for lifecycle,
+capacity, PHP temporary-directory, and recovery guidance.
+
 1. upload a media file; the CMS encrypts it into a private LDG v1 container;
 2. assign it to one or more active Players;
 3. wait for the next Player heartbeat, or use Refresh for an immediate sync;

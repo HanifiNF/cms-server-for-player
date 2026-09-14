@@ -5,6 +5,7 @@ namespace App\Controllers\Web;
 use App\Controllers\BaseController;
 use App\Libraries\StorageManager;
 use App\Libraries\StorageCredentialService;
+use App\Libraries\MediaWorkspaceService;
 use App\Libraries\Storage\FtpsStorageDriver;
 use App\Libraries\Storage\SftpStorageDriver;
 use App\Models\StorageProfileModel;
@@ -41,7 +42,27 @@ class StorageController extends BaseController
                 'credentialUsername' => $credentialUsername,
             ];
         }
-        return view('web/storage', ['title' => 'Storage Settings', 'active' => 'storage', 'admin' => $this->admin(), 'profiles' => $profiles]);
+        $workspace = (new MediaWorkspaceService())->status();
+        return view('web/storage', ['title' => 'Storage Settings', 'active' => 'storage', 'admin' => $this->admin(), 'profiles' => $profiles, 'workspace' => $workspace]);
+    }
+
+    public function updateWorkspace(): RedirectResponse
+    {
+        try {
+            $status = (new MediaWorkspaceService())->configure(
+                (string) $this->request->getPost('root_path'),
+                (int) session()->get('cms_web_user_id'),
+            );
+            return redirect()->to('/control/storage')->with('success', 'CMS media workspace is ready at ' . $status['root_path'] . '. New media work will use this location.');
+        } catch (Throwable $error) {
+            return redirect()->to('/control/storage')->withInput()->with('error', $error->getMessage())->with('modal', 'configure-workspace-modal');
+        }
+    }
+
+    public function testWorkspace(): RedirectResponse
+    {
+        $result = (new MediaWorkspaceService())->test();
+        return redirect()->to('/control/storage')->with($result['ok'] ? 'success' : 'error', 'CMS media workspace: ' . $result['message']);
     }
 
     public function create(): RedirectResponse

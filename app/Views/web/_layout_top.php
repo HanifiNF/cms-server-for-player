@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="<?= base_url('assets/cms-library.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-library.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-modal.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-modal.css') ?: 1) ?>">
   <link rel="stylesheet" href="<?= base_url('assets/cms-storage.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-storage.css') ?: 1) ?>">
+  <link rel="stylesheet" href="<?= base_url('assets/cms-workspace.css') ?>?v=<?= (int) (@filemtime(FCPATH . 'assets/cms-workspace.css') ?: 1) ?>">
 </head>
 <body>
 <div class="app-shell">

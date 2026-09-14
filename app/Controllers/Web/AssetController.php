@@ -14,6 +14,7 @@ use App\Libraries\AssetStoragePathService;
 use App\Libraries\AssetTaxonomyService;
 use App\Models\GenreModel;
 use App\Libraries\MediaMetadataService;
+use App\Libraries\MediaWorkspaceService;
 use App\Libraries\LdgCryptoService;
 use App\Libraries\RealtimeOutboxService;
 use App\Libraries\StorageManager;
@@ -682,7 +683,7 @@ class AssetController extends BaseController
         $transactionStarted = false;
         try {
             if ($objects !== []) {
-                $stagingDir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . '.delete-staging';
+                $stagingDir = (new MediaWorkspaceService())->path('storage_staging') . DIRECTORY_SEPARATOR . 'delete-staging';
                 if (! is_dir($stagingDir) && ! mkdir($stagingDir, 0775, true) && ! is_dir($stagingDir)) {
                     throw new RuntimeException('The deletion staging directory could not be created.');
                 }

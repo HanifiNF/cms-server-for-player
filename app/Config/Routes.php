@@ -59,6 +59,8 @@ $routes->group('control', ['filter' => 'web-admin'], static function (RouteColle
     $routes->post('genres/(:segment)/status', 'Web\AssetController::genreStatus/$1');
     $routes->get('storage', 'Web\StorageController::index');
     $routes->post('storage', 'Web\StorageController::create');
+    $routes->post('storage/workspace', 'Web\StorageController::updateWorkspace');
+    $routes->post('storage/workspace/test', 'Web\StorageController::testWorkspace');
     $routes->post('storage/(:segment)/default', 'Web\StorageController::makeDefault/$1');
     $routes->post('storage/(:segment)/status', 'Web\StorageController::status/$1');
     $routes->post('storage/(:segment)/test', 'Web\StorageController::test/$1');

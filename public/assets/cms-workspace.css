@@ -1,0 +1,36 @@
+.workspace-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.workspace-card.is-healthy { border-top: 4px solid var(--green); }
+.workspace-card.is-unavailable { border-top: 4px solid var(--red); }
+
+.workspace-facts {
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(100px, 1fr));
+}
+
+.workspace-note {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 11px;
+}
+
+.workspace-note strong { white-space: nowrap; }
+.workspace-note code { overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+  .workspace-facts { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 650px) {
+  .workspace-facts { grid-template-columns: 1fr; }
+  .workspace-note { flex-direction: column; }
+}

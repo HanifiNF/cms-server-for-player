@@ -7,6 +7,7 @@ use App\Models\AssetVersionModel;
 use App\Models\LocationModel;
 use App\Models\UserModel;
 use App\Models\StorageProfileModel;
+use App\Models\MediaWorkspaceSettingModel;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
 use CodeIgniter\Test\FeatureTestTrait;
@@ -212,6 +213,8 @@ final class WebControlPanelTest extends CIUnitTestCase
         $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/storage');
         $page->assertOK();
         $page->assertSee('Storage Profiles');
+        $page->assertSee('CMS MEDIA WORKSPACE');
+        $page->assertSee('Configure Workspace');
         $page->assertSee('Local Storage');
         $page->assertSee('Company FTPS');
         $page->assertSee('Company SFTP');
@@ -241,6 +244,42 @@ final class WebControlPanelTest extends CIUnitTestCase
         } finally {
             $path = rtrim(WRITEPATH, '\\/') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $root);
             if (is_dir($path)) @rmdir($path);
+        }
+    }
+
+    public function testAdministratorCanConfigureAndTestTheServerMediaWorkspace(): void
+    {
+        $adminId = (new UserModel())->insert([
+            'email' => 'workspace-admin@example.com', 'name' => 'Workspace Admin',
+            'password_hash' => password_hash('Workspace-Admin-Password-2026!', PASSWORD_ARGON2ID),
+            'role' => 'admin', 'status' => 'active',
+        ], true);
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cms-web-workspace-' . bin2hex(random_bytes(6));
+        mkdir($root, 0775, true);
+        try {
+            $configured = $this->withSession(['cms_web_user_id' => $adminId])
+                ->postForm('/control/storage/workspace', ['root_path' => $root]);
+            $configured->assertRedirectTo('/control/storage');
+            $setting = (new MediaWorkspaceSettingModel())->find(1);
+            $this->assertNotNull($setting);
+            $this->assertSame((string) realpath($root), $setting->root_path);
+            $this->assertFileExists($root . DIRECTORY_SEPARATOR . '.wir-cms-workspace.json');
+
+            $page = $this->withSession(['cms_web_user_id' => $adminId])->get('/control/storage');
+            $page->assertOK();
+            $page->assertSee('Environment workspace');
+            $page->assertSee((string) realpath($root));
+            $tested = $this->withSession(['cms_web_user_id' => $adminId])
+                ->postForm('/control/storage/workspace/test', []);
+            $tested->assertRedirectTo('/control/storage');
+            $this->assertSame('healthy', (new MediaWorkspaceSettingModel())->find(1)->last_test_status);
+        } finally {
+            (new MediaWorkspaceSettingModel())->where('id >', 0)->delete();
+            if (is_dir($root)) {
+                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+                foreach ($iterator as $item) $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+                @rmdir($root);
+            }
         }
     }
 

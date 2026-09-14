@@ -2,6 +2,7 @@
 
 namespace App\Libraries\Storage;
 
+use App\Libraries\MediaWorkspaceService;
 use Config\Storage;
 use RuntimeException;
 use Throwable;
@@ -171,7 +172,7 @@ final class FtpsStorageDriver implements StorageDriverInterface
 
     public function testConnection(): array
     {
-        $staging = WRITEPATH . 'storage-staging';
+        $staging = (new MediaWorkspaceService())->path('storage_staging');
         if (! is_dir($staging) && ! mkdir($staging, 0775, true) && ! is_dir($staging)) return ['ok' => false, 'message' => 'The storage staging directory could not be created.'];
         $source = tempnam($staging, 'ftps-probe-');
         if ($source === false) return ['ok' => false, 'message' => 'An FTPS probe file could not be created.'];
@@ -209,7 +210,7 @@ final class FtpsStorageDriver implements StorageDriverInterface
         if ($key === '' || ! preg_match('#^[A-Za-z0-9._/-]+$#', $key)) throw new RuntimeException('FTPS storage key contains unsupported characters.');
         self::assertRemotePath('/' . $key, 'FTPS storage key');
         $name = hash('sha256', $key) . '-' . basename($key);
-        return WRITEPATH . 'storage-cache' . DIRECTORY_SEPARATOR . $this->config['_profile_id'] . DIRECTORY_SEPARATOR . $name;
+        return (new MediaWorkspaceService())->path('storage_cache') . DIRECTORY_SEPARATOR . $this->config['_profile_id'] . DIRECTORY_SEPARATOR . $name;
     }
 
     /** @param callable(int,int):void|null $progress */

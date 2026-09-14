@@ -69,7 +69,7 @@ final class StorageManager
 
     public function temporaryPath(string $suffix = ''): string
     {
-        $directory = WRITEPATH . 'storage-staging';
+        $directory = (new MediaWorkspaceService())->path('storage_staging');
         if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
             throw new RuntimeException('The storage staging directory could not be created.');
         }
