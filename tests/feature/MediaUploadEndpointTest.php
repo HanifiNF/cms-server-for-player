@@ -109,6 +109,34 @@ final class MediaUploadEndpointTest extends CIUnitTestCase
         ];
     }
 
+    public function testExternalJobAcceptsMetadataOnlyAndReturnsJson(): void
+    {
+        $ownerId = $this->user('external-job-web@example.com', 'admin');
+        $result = $this->postWithCsrf('/control/assets/external-encryption', [
+            'title' => 'Local encryption film', 'asset_type' => 'featured',
+            'delivery_mode' => 'sideload',
+        ], $ownerId);
+        $result->assertOK();
+        $payload = json_decode($result->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('/control/library', $payload['data']['redirect']);
+        $this->assertNotEmpty($payload['csrf']['hash']);
+        $job = (new \App\Models\ExternalEncryptionJobModel())->where('public_id', $payload['data']['job_id'])->first();
+        $this->assertSame($ownerId, (int) $job->owner_user_id);
+        $this->assertSame('pending', $job->status);
+    }
+
+    public function testExternalJobValidationReturnsJsonWithoutCreatingJob(): void
+    {
+        $ownerId = $this->user('external-job-invalid@example.com', 'admin');
+        $result = $this->postWithCsrf('/control/assets/external-encryption', [
+            'title' => '', 'asset_type' => 'featured',
+        ], $ownerId);
+        $result->assertStatus(422);
+        $payload = json_decode($result->response()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertStringContainsString('Title is required', $payload['error']['message']);
+        $this->assertSame(0, (new \App\Models\ExternalEncryptionJobModel())->where('owner_user_id', $ownerId)->countAllResults());
+    }
+
     /** @param array<string,mixed> $data */
     private function postWithCsrf(string $uri, array $data, int $userId)
     {

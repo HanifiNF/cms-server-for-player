@@ -28,7 +28,10 @@ final class MediaUploadController extends BaseController
     public function token(): ResponseInterface
     {
         $this->currentUser();
-        return $this->response->setJSON(['data' => [], 'csrf' => $this->csrf()]);
+        return $this->response
+            ->setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            ->setHeader('Pragma', 'no-cache')
+            ->setJSON(['data' => [], 'csrf' => $this->csrf()]);
     }
 
     public function initiate(): ResponseInterface

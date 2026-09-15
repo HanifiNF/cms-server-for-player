@@ -239,6 +239,8 @@
       var sideload = selected && selected.value === 'sideload';
       form.action = sideload ? '/control/assets/external-encryption' : originalAction;
       fileInput.required = !sideload;
+      fileInput.disabled = Boolean(sideload);
+      if (posterField) posterField.querySelectorAll('input').forEach(function (input) { input.disabled = Boolean(sideload); });
       if (mediaField) mediaField.hidden = sideload;
       if (posterField) posterField.hidden = sideload;
       if (sideloadNote) sideloadNote.hidden = !sideload;
@@ -360,7 +362,8 @@
     }
 
     function recoverCsrf(base) {
-      return fetch(base, {
+      var separator = base.indexOf('?') === -1 ? '?' : '&';
+      return fetch(base + separator + 'csrf_refresh=' + encodeURIComponent(String(Date.now())), {
         credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
       }).then(function (response) { return response.json(); }).then(function (payload) {
         restoreCsrf(payload);
@@ -446,7 +449,50 @@
 
     form.addEventListener('submit', async function (event) {
       var delivery = form.querySelector('input[name="delivery_mode"]:checked');
-      if (delivery && delivery.value === 'sideload') return;
+      if (delivery && delivery.value === 'sideload') {
+        event.preventDefault();
+        if (form.dataset.sideloadSubmitting === 'true') return;
+        if (!form.reportValidity()) return;
+        form.dataset.sideloadSubmitting = 'true';
+        submitButton.disabled = true;
+        submitButton.textContent = 'Creating job…';
+        try {
+          error.textContent = '';
+          for (var jobAttempt = 0; jobAttempt < 2; jobAttempt += 1) {
+            await recoverCsrf(uploadUrl(form.dataset.uploadBase));
+            // Send text metadata only, even if a film was selected before the
+            // delivery mode changed. Hidden file inputs otherwise submit files.
+            var jobData = new URLSearchParams();
+            new FormData(form).forEach(function (value, key) {
+              if (typeof value === 'string') jobData.append(key, value);
+            });
+            var jobResponse = await fetch(form.action, {
+              method: 'POST', credentials: 'same-origin', cache: 'no-store',
+              headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+              body: jobData
+            });
+            // A rejected CSRF request has not reached the controller. Other
+            // failures must not auto-retry, since the job may already exist.
+            if (jobResponse.status === 403 && jobAttempt === 0) continue;
+            var jobPayload = await jobResponse.json().catch(function () { return {}; });
+            restoreCsrf(jobPayload);
+            if (!jobResponse.ok || !jobPayload.data || !jobPayload.data.redirect) {
+              throw new Error(jobPayload.error && jobPayload.error.message || 'Could not create encryption job (HTTP ' + jobResponse.status + ').');
+            }
+            window.location.assign(localRedirect(jobPayload.data.redirect));
+            break;
+          }
+        } catch (tokenError) {
+          form.dataset.sideloadSubmitting = 'false';
+          submitButton.disabled = false;
+          submitButton.textContent = 'Create encryption job';
+          panel.hidden = false;
+          status.textContent = 'Encryption job could not be created';
+          error.textContent = tokenError.message || 'Check the connection and try again.';
+          cancel.disabled = true;
+        }
+        return;
+      }
       if (!fileInput.files.length && form.dataset.uploadPurpose === 'revision') return;
       event.preventDefault();
       if (request || !fileInput.files.length) return;

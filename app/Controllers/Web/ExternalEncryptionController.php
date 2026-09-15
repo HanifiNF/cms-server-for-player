@@ -5,13 +5,13 @@ namespace App\Controllers\Web;
 use App\Controllers\BaseController;
 use App\Libraries\AssetTaxonomyService;
 use App\Libraries\ExternalEncryptionJobService;
-use CodeIgniter\HTTP\RedirectResponse;
+use CodeIgniter\HTTP\ResponseInterface;
 use RuntimeException;
 use Throwable;
 
 class ExternalEncryptionController extends BaseController
 {
-    public function create(): RedirectResponse
+    public function create(): ResponseInterface
     {
         try {
             $taxonomy = new AssetTaxonomyService();
@@ -29,8 +29,21 @@ class ExternalEncryptionController extends BaseController
                 'expires_on' => $this->nullable('expires_on', 10), 'distributor_company' => $this->nullable('distributor_company', 180),
             ];
             $job = (new ExternalEncryptionJobService())->create((int) session()->get('cms_web_user_id'), $metadata);
+            if ($this->request->isAJAX()) {
+                session()->setFlashdata('success', 'External encryption job created: ' . $job->public_id . '. Open Encryption Tool and sign in to process it.');
+                return $this->response->setJSON([
+                    'data' => ['job_id' => $job->public_id, 'redirect' => '/control/library'],
+                    'csrf' => ['name' => csrf_token(), 'hash' => csrf_hash()],
+                ]);
+            }
             return redirect()->to('/control/library')->with('success', 'External encryption job created: ' . $job->public_id . '. Open Encryption Tool and sign in to process it.');
         } catch (Throwable $error) {
+            if ($this->request->isAJAX()) {
+                return $this->response->setStatusCode(422)->setJSON([
+                    'error' => ['message' => $error->getMessage()],
+                    'csrf' => ['name' => csrf_token(), 'hash' => csrf_hash()],
+                ]);
+            }
             return redirect()->to('/control/library')->withInput()->with('error', $error->getMessage());
         }
     }
