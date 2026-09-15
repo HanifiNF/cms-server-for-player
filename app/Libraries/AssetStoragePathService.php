@@ -34,6 +34,9 @@ final class AssetStoragePathService
 
     public function playerRelativePath(object $asset): string
     {
+        if ((string) ($asset->delivery_mode ?? 'remote') === 'sideload' && trim((string) ($asset->storage_key ?? '')) === '') {
+            return substr($this->newMediaKey((string) ($asset->title ?? 'Film'), (string) ($asset->public_id ?? ''), max(1, (int) ($asset->revision ?? 1))), strlen(self::ASSET_PREFIX));
+        }
         $relative = $this->relativeStoragePath((string) ($asset->storage_key ?? ''));
         if (str_contains($relative, '/')) return $relative;
 

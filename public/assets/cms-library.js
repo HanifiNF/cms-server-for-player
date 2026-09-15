@@ -228,6 +228,26 @@
     var request = null;
     var session = null;
     var cancelled = false;
+    var originalAction = form.action;
+    var deliveryInputs = Array.from(form.querySelectorAll('input[name="delivery_mode"]'));
+    var mediaField = form.querySelector('[data-media-file-field]');
+    var posterField = form.querySelector('[data-poster-field]');
+    var sideloadNote = form.querySelector('[data-sideload-note]');
+
+    function syncDeliveryMode() {
+      var selected = deliveryInputs.find(function (input) { return input.checked; });
+      var sideload = selected && selected.value === 'sideload';
+      form.action = sideload ? '/control/assets/external-encryption' : originalAction;
+      fileInput.required = !sideload;
+      if (mediaField) mediaField.hidden = sideload;
+      if (posterField) posterField.hidden = sideload;
+      if (sideloadNote) sideloadNote.hidden = !sideload;
+      submitButton.textContent = sideload ? 'Create encryption job' : 'Upload asset';
+      var title = form.querySelector('input[name="title"]');
+      if (title) title.required = Boolean(sideload);
+    }
+    deliveryInputs.forEach(function (input) { input.addEventListener('change', syncDeliveryMode); });
+    syncDeliveryMode();
 
     function restoreCsrf(payload) {
       if (!payload || !payload.csrf) return;
@@ -425,6 +445,8 @@
     }
 
     form.addEventListener('submit', async function (event) {
+      var delivery = form.querySelector('input[name="delivery_mode"]:checked');
+      if (delivery && delivery.value === 'sideload') return;
       if (!fileInput.files.length && form.dataset.uploadPurpose === 'revision') return;
       event.preventDefault();
       if (request || !fileInput.files.length) return;

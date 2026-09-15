@@ -203,6 +203,31 @@ class LdgCryptoService
         return trim($base, '-.') . '.ldg';
     }
 
+    /** @return array{key:string,wrapped_dek:string,dek_nonce:string,dek_tag:string,key_version:int} */
+    public function createExternalDataKey(string $assetPublicId, int $revision): array
+    {
+        $dek = random_bytes(32);
+        $wrapped = $this->wrapMasterKey($dek, $assetPublicId, $revision);
+        return [
+            'key' => base64_encode($dek),
+            'wrapped_dek' => $wrapped['ciphertext'],
+            'dek_nonce' => $wrapped['nonce'],
+            'dek_tag' => $wrapped['tag'],
+            'key_version' => 1,
+        ];
+    }
+
+    public function recoverExternalDataKey(object $job): string
+    {
+        return base64_encode($this->unwrapMasterKey(
+            (string) $job->wrapped_dek,
+            (string) $job->dek_nonce,
+            (string) $job->dek_tag,
+            (string) $job->result_public_id,
+            max(1, (int) $job->revision),
+        ));
+    }
+
     private function masterKey(): string
     {
         if ($this->config->masterKey !== '') {

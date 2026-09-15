@@ -86,6 +86,7 @@ $routes->group('control', ['filter' => 'web-assets'], static function (RouteColl
     $routes->get('library/(:segment)/versions/collection', 'Web\MediaLibraryController::versionCollection/$1');
     $routes->get('library/(:segment)/schedules/collection', 'Web\MediaLibraryController::scheduleCollection/$1');
     $routes->post('assets/upload', 'Web\AssetController::upload');
+    $routes->post('assets/external-encryption', 'Web\ExternalEncryptionController::create');
     $routes->post('assets/uploads', 'Web\MediaUploadController::initiate');
     $routes->get('assets/uploads', 'Web\MediaUploadController::token');
     $routes->get('assets/uploads/(:segment)', 'Web\MediaUploadController::status/$1');
@@ -101,6 +102,12 @@ $routes->group('api', static function (RouteCollection $routes): void {
     $routes->post('auth/login', 'Api\AuthController::login');
     $routes->post('auth/logout', 'Api\AuthController::logout');
     $routes->get('auth/me', 'Api\AuthController::me');
+    $routes->get('external-encryption/jobs', 'Api\ExternalEncryptionController::index');
+    $routes->post('external-encryption/jobs/(:segment)/claim', 'Api\ExternalEncryptionController::claim/$1');
+    $routes->post('external-encryption/jobs/(:segment)/recover', 'Api\ExternalEncryptionController::recover/$1');
+    $routes->post('external-encryption/jobs/(:segment)/progress', 'Api\ExternalEncryptionController::progress/$1');
+    $routes->post('external-encryption/jobs/(:segment)/finalize', 'Api\ExternalEncryptionController::finalize/$1');
+    $routes->post('external-encryption/jobs/(:segment)/cancel', 'Api\ExternalEncryptionController::cancel/$1');
 
     $routes->get('operator/devices/available', 'Api\Operator\DeviceController::available');
     $routes->post('operator/devices/(:segment)/control-access', 'Api\Operator\DeviceController::controlAccess/$1');

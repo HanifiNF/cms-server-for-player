@@ -10,6 +10,7 @@ use App\Models\AssetModel;
 use App\Models\AssetVersionModel;
 use App\Models\DeviceAssetModel;
 use App\Models\DeviceModel;
+use App\Models\ExternalEncryptionJobModel;
 use App\Models\LocationModel;
 use App\Models\UserModel;
 use CodeIgniter\HTTP\RedirectResponse;
@@ -23,6 +24,10 @@ class MediaLibraryController extends BaseController
         (new AssetExpiryService())->expireDue();
         $data = $this->catalogContext();
         $data['catalogTotal'] = (clone $this->filteredCatalogQuery($data['admin'], $data['filters']))->countAllResults();
+        (new \App\Libraries\ExternalEncryptionJobService())->cleanupExpired();
+        $data['externalEncryptionJobs'] = (new ExternalEncryptionJobModel())
+            ->where('owner_user_id', $data['admin']->id)->whereNotIn('status', ['completed', 'cancelled', 'expired'])
+            ->orderBy('created_at', 'DESC')->findAll(20);
         return view('web/media_library', $data);
     }
 

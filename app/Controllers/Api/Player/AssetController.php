@@ -129,7 +129,8 @@ class AssetController extends BaseController
                 'filename' => $encrypted ? $ldg->downloadFilename($asset) : $asset->filename,
                 'relative_path' => $paths->playerRelativePath($asset),
                 'display_filename' => $asset->filename,
-                'download_url' => '/api/player/assets/' . rawurlencode($asset->public_id) . '/download',
+                'delivery_mode' => (string) ($asset->delivery_mode ?? 'remote'),
+                'download_url' => (string) ($asset->delivery_mode ?? 'remote') === 'sideload' ? null : '/api/player/assets/' . rawurlencode($asset->public_id) . '/download',
                 'size' => (int) $asset->size_bytes,
                 'sha256' => $asset->sha256,
                 'mime_type' => $encrypted ? LdgCryptoService::MIME_TYPE : $asset->mime_type,
@@ -199,6 +200,11 @@ class AssetController extends BaseController
 
         $asset = (new AssetModel())->where('public_id', $publicId)->where('status', 'active')->first();
         if ($asset === null) return $this->assetNotFound();
+        if ((string) ($asset->delivery_mode ?? 'remote') === 'sideload') {
+            return $this->response->setStatusCode(409)->setJSON(['error' => [
+                'code' => 'sideload_required', 'message' => 'This asset must be imported from its LDG side-load package.',
+            ]]);
+        }
         $assignment = (new DeviceAssetModel())->where('device_id', $device->id)->where('asset_id', $asset->id)
             ->where('status !=', 'removal_pending')->first();
         if ($assignment === null) return $this->assetNotFound();

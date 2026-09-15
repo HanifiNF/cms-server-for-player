@@ -666,17 +666,21 @@ class AssetController extends BaseController
         $pathService = new AssetStoragePathService();
         $objects = [];
         $assetDirectories = [];
-        $assetProfile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
-        $objects[(int) $assetProfile->id . ':' . (string) $asset->storage_key] = [$assetProfile, (string) $asset->storage_key];
-        $assetDirectory = $pathService->assetDirectoryKey((string) $asset->storage_key);
-        if ($assetDirectory !== null) $assetDirectories[(int) $assetProfile->id . ':' . $assetDirectory] = [$assetProfile, $assetDirectory];
+        $assetProfile = null;
+        if (trim((string) $asset->storage_key) !== '') {
+            $assetProfile = $storage->profile($asset->storage_profile_id === null ? null : (int) $asset->storage_profile_id);
+            $objects[(int) $assetProfile->id . ':' . (string) $asset->storage_key] = [$assetProfile, (string) $asset->storage_key];
+            $assetDirectory = $pathService->assetDirectoryKey((string) $asset->storage_key);
+            if ($assetDirectory !== null) $assetDirectories[(int) $assetProfile->id . ':' . $assetDirectory] = [$assetProfile, $assetDirectory];
+        }
         foreach ((new AssetVersionModel())->where('asset_id', $asset->id)->findAll() as $version) {
+            if (trim((string) $version->storage_key) === '') continue;
             $profile = $storage->profile($version->storage_profile_id === null ? null : (int) $version->storage_profile_id);
             $objects[(int) $profile->id . ':' . (string) $version->storage_key] = [$profile, (string) $version->storage_key];
             $assetDirectory = $pathService->assetDirectoryKey((string) $version->storage_key);
             if ($assetDirectory !== null) $assetDirectories[(int) $profile->id . ':' . $assetDirectory] = [$profile, $assetDirectory];
         }
-        if ((string) $asset->poster_storage_key !== '') {
+        if ($assetProfile !== null && (string) $asset->poster_storage_key !== '') {
             $objects[(int) $assetProfile->id . ':' . (string) $asset->poster_storage_key] = [$assetProfile, (string) $asset->poster_storage_key];
         }
         $stagedFiles = [];

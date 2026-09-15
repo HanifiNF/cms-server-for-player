@@ -5,6 +5,10 @@
   <div class="cms-toolbar-actions"><?php if ($isAdmin): ?><button class="btn ghost" type="button" data-cms-modal-open="genre-manager-modal">Manage genre options</button><?php endif ?><button class="btn primary" type="button" data-open-asset-upload>+ Add Asset</button></div>
 </section>
 
+<?php if (($externalEncryptionJobs ?? []) !== []): ?>
+<section class="card" style="padding:16px;margin-bottom:18px"><div class="section-heading"><div><p>MANUAL SIDE-LOAD</p><h2>Encryption jobs</h2></div><span class="badge"><?= count($externalEncryptionJobs) ?> active</span></div><div class="genre-admin-list"><?php foreach ($externalEncryptionJobs as $job): $meta = json_decode((string) $job->metadata_json, true) ?: []; ?><div><span><strong><?= esc($meta['title'] ?? 'Untitled film') ?></strong><small><?= esc($job->public_id) ?></small></span><span><strong><?= esc(strtoupper((string) $job->status)) ?></strong><small><?= number_format((float) $job->progress_percent, 0) ?>% · expires <?= esc($job->expires_at) ?> UTC</small></span></div><?php endforeach ?></div><small class="upload-note">Open WIR LDG Encryption Tool and sign in to process these jobs. The asset enters the catalog after verification completes.</small></section>
+<?php endif ?>
+
 <section class="library-status-grid" aria-label="Asset status summary">
   <?php foreach (['total' => 'Total', 'draft' => 'Draft', 'active' => 'Active', 'rejected' => 'Rejected', 'expired' => 'Expired'] as $value => $label): ?>
     <a class="library-status-card <?= ($filters['status'] === $value || ($value === 'total' && $filters['status'] === '')) ? 'selected' : '' ?>" href="<?= site_url('control/library' . ($value === 'total' ? '' : '?status=' . $value)) ?>"><span><?= esc(strtoupper($label)) ?></span><strong><?= (int) $statusCounts[$value] ?></strong></a>
