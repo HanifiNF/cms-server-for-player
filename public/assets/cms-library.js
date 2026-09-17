@@ -240,9 +240,8 @@
       form.action = sideload ? '/control/assets/external-encryption' : originalAction;
       fileInput.required = !sideload;
       fileInput.disabled = Boolean(sideload);
-      if (posterField) posterField.querySelectorAll('input').forEach(function (input) { input.disabled = Boolean(sideload); });
       if (mediaField) mediaField.hidden = sideload;
-      if (posterField) posterField.hidden = sideload;
+      if (posterField) posterField.hidden = false;
       if (sideloadNote) sideloadNote.hidden = !sideload;
       submitButton.textContent = sideload ? 'Create encryption job' : 'Upload asset';
       var title = form.querySelector('input[name="title"]');
@@ -460,12 +459,10 @@
           error.textContent = '';
           for (var jobAttempt = 0; jobAttempt < 2; jobAttempt += 1) {
             await recoverCsrf(uploadUrl(form.dataset.uploadBase));
-            // Send text metadata only, even if a film was selected before the
-            // delivery mode changed. Hidden file inputs otherwise submit files.
-            var jobData = new URLSearchParams();
-            new FormData(form).forEach(function (value, key) {
-              if (typeof value === 'string') jobData.append(key, value);
-            });
+            // The film input is disabled in side-load mode, so this contains
+            // metadata and the optional poster without uploading the film.
+            var jobData = new FormData(form);
+            jobData.delete('media');
             var jobResponse = await fetch(form.action, {
               method: 'POST', credentials: 'same-origin', cache: 'no-store',
               headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },

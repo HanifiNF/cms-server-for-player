@@ -18,7 +18,6 @@ async function submit(responses) {
   const sent = [];
   const destinations = [];
   const context = {
-    URLSearchParams,
     form: {
       dataset: { uploadBase: '/control/assets/uploads' },
       action: '/control/assets/external-encryption',
@@ -27,14 +26,16 @@ async function submit(responses) {
       addEventListener: (_, fn) => { handler = fn; },
     },
     FormData: class {
-      forEach(fn) {
-        fn('Film A', 'title');
-        fn('fresh-token', 'csrf_test_name');
-        fn('1', 'genre_ids[]');
-        fn('2', 'genre_ids[]');
-        fn({ size: 4590000000, name: 'film.mp4' }, 'media');
-        fn({ size: 10000, name: 'poster.jpg' }, 'poster');
-      }
+      constructor() { this.values = [
+        ['title', 'Film A'], ['csrf_test_name', 'fresh-token'],
+        ['genre_ids[]', '1'], ['genre_ids[]', '2'],
+        ['media', { size: 4590000000, name: 'film.mp4' }],
+        ['poster', { size: 10000, name: 'poster.jpg' }],
+      ]; }
+      delete(key) { this.values = this.values.filter(item => item[0] !== key); }
+      has(key) { return this.values.some(item => item[0] === key); }
+      get(key) { const item = this.values.find(value => value[0] === key); return item && item[1]; }
+      getAll(key) { return this.values.filter(item => item[0] === key).map(item => item[1]); }
     },
     recoverCsrf: async () => { recovered += 1; },
     uploadUrl: value => value,
@@ -55,11 +56,11 @@ async function submit(responses) {
   return { context, sent, destinations, recovered, prevented };
 }
 
-test('job request excludes film and poster, preserves metadata and CSRF', async () => {
+test('job request excludes film and preserves poster, metadata and CSRF', async () => {
   const result = await submit([200]);
   const body = result.sent[0].body;
   assert.equal(body.has('media'), false);
-  assert.equal(body.has('poster'), false);
+  assert.equal(body.has('poster'), true);
   assert.equal(body.get('title'), 'Film A');
   assert.equal(body.get('csrf_test_name'), 'fresh-token');
   assert.deepEqual(body.getAll('genre_ids[]'), ['1', '2']);

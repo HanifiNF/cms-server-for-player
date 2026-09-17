@@ -103,6 +103,11 @@ $routes->group('api', static function (RouteCollection $routes): void {
     $routes->post('auth/logout', 'Api\AuthController::logout');
     $routes->get('auth/me', 'Api\AuthController::me');
     $routes->get('external-encryption/jobs', 'Api\ExternalEncryptionController::index');
+    $routes->get('external-encryption/options', 'Api\ExternalEncryptionController::options');
+    $routes->post('external-encryption/jobs', 'Api\ExternalEncryptionController::create');
+    $routes->get('external-encryption/jobs/(:segment)', 'Api\ExternalEncryptionController::detail/$1');
+    $routes->post('external-encryption/jobs/(:segment)/metadata', 'Api\ExternalEncryptionController::updateMetadata/$1');
+    $routes->get('external-encryption/jobs/(:segment)/poster', 'Api\ExternalEncryptionController::poster/$1');
     $routes->post('external-encryption/jobs/(:segment)/claim', 'Api\ExternalEncryptionController::claim/$1');
     $routes->post('external-encryption/jobs/(:segment)/recover', 'Api\ExternalEncryptionController::recover/$1');
     $routes->post('external-encryption/jobs/(:segment)/progress', 'Api\ExternalEncryptionController::progress/$1');

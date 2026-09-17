@@ -20,10 +20,13 @@ final class ExternalEncryptionJobService
         $model = new ExternalEncryptionJobModel();
         $jobs = $model->whereNotIn('status', ['completed', 'cancelled', 'expired'])
             ->where('expires_at <', gmdate('Y-m-d H:i:s'))->findAll();
-        foreach ($jobs as $job) $model->update((int) $job->id, [
-            'status' => 'expired', 'job_token_hash' => null, 'wrapped_dek' => null,
-            'dek_nonce' => null, 'dek_tag' => null, 'error_message' => 'Encryption job expired after seven days without activity.',
-        ]);
+        foreach ($jobs as $job) {
+            $this->removeStagedPoster($job);
+            $model->update((int) $job->id, [
+                'status' => 'expired', 'poster_name' => null, 'job_token_hash' => null, 'wrapped_dek' => null,
+                'dek_nonce' => null, 'dek_tag' => null, 'error_message' => 'Encryption job expired after seven days without activity.',
+            ]);
+        }
         return count($jobs);
     }
 
@@ -42,10 +45,96 @@ final class ExternalEncryptionJobService
         return (new ExternalEncryptionJobModel())->find($id);
     }
 
+    /** @param array<string,string> $posterInfo */
+    public function storePoster(object $job, object $poster, array $posterInfo): object
+    {
+        $source = (string) $poster->getTempName();
+        if ($source === '' || ! is_file($source)) throw new RuntimeException('Poster staging file was not found.');
+        $name = (string) $job->public_id . '.' . bin2hex(random_bytes(8)) . '.poster.' . (string) $posterInfo['extension'];
+        $destination = $this->posterPath($name);
+        if (! @copy($source, $destination)) throw new RuntimeException('Poster could not be staged for the encryption job.');
+        $metadata = json_decode((string) $job->metadata_json, true);
+        if (! is_array($metadata)) $metadata = [];
+        $metadata['_poster'] = $posterInfo;
+        $updated = (new ExternalEncryptionJobModel())->update((int) $job->id, [
+            'poster_name' => $name,
+            'metadata_json' => json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}',
+        ]);
+        if (! $updated) { @unlink($destination); throw new RuntimeException('Poster metadata could not be saved.'); }
+        return (new ExternalEncryptionJobModel())->find((int) $job->id);
+    }
+
+    public function cancel(object $job): void
+    {
+        if ((string) $job->status === 'completed') throw new RuntimeException('A completed job cannot be cancelled.');
+        $this->removeStagedPoster($job);
+        (new ExternalEncryptionJobModel())->update((int) $job->id, [
+            'status' => 'cancelled', 'poster_name' => null, 'job_token_hash' => null,
+        ]);
+    }
+
+    public function discard(object $job): void
+    {
+        $this->removeStagedPoster($job);
+        (new ExternalEncryptionJobModel())->delete((int) $job->id);
+    }
+
+    public function saveMetadata(int $ownerId, array $input, ?object $poster, ?string $publicId = null): object
+    {
+        $validator = new ExternalJobMetadata();
+        $metadata = $validator->validate($input);
+        $posterInfo = $validator->poster($poster);
+        $key = (string) ($input['creation_key'] ?? '');
+        if ($publicId === null && ! preg_match('/^[a-zA-Z0-9-]{16,64}$/', $key)) throw new RuntimeException('A creation key is required.');
+        $db = Database::connect(); $db->transBegin(); $old = null; $saved = null;
+        try {
+            // Serialize creates for this operator so lost-response retries return
+            // the original job, including its staged poster.
+            if ($db->DBDriver === 'Postgre') $db->query('SELECT pg_advisory_xact_lock(19471, ?)', [$ownerId]);
+            $model = new ExternalEncryptionJobModel();
+            if ($publicId === null) {
+                $existing = $model->where('owner_user_id', $ownerId)->where('creation_key', $key)->first();
+                if ($existing) { $db->transCommit(); return $existing; }
+                $saved = $this->create($ownerId, $metadata);
+                $model->update($saved->id, ['creation_key'=>$key]);
+            } else {
+                $old = $model->where('public_id', $publicId)->where('owner_user_id', $ownerId)->first();
+                if (! $old) throw new RuntimeException('Encryption job was not found.');
+                if ($old->status !== 'pending' || (int) $old->edit_version !== (int) ($input['edit_version'] ?? 0)
+                    || strtotime($old->expires_at) < time()) throw new RuntimeException('Job changed or was claimed. Reload it before continuing.', 409);
+                $oldMetadata = json_decode($old->metadata_json, true);
+                $remove = ($input['remove_poster'] ?? '') === '1';
+                if (! $remove && isset($oldMetadata['_poster'])) $metadata['_poster'] = $oldMetadata['_poster'];
+                $db->table('external_encryption_jobs')->where('id', $old->id)->where('status','pending')->where('edit_version', $old->edit_version)->update([
+                    'metadata_json'=>json_encode($metadata), 'edit_version'=>(int) $old->edit_version + 1,
+                    'poster_name'=>$remove ? null : $old->poster_name, 'expires_at'=>gmdate('Y-m-d H:i:s', strtotime(self::LIFETIME)),
+                ]);
+                if ($db->affectedRows() !== 1) throw new RuntimeException('Job changed or was claimed. Reload it before continuing.', 409);
+                $saved = $model->find($old->id);
+            }
+            if ($posterInfo) $saved = $this->storePoster($saved, $poster, $posterInfo);
+            $saved = $model->find($saved->id);
+            if (! $db->transStatus()) throw new RuntimeException('Metadata could not be saved.');
+            $db->transCommit();
+        } catch (Throwable $e) {
+            $db->transRollback();
+            if ($saved && $saved->poster_name && $saved->poster_name !== ($old->poster_name ?? null)) $this->removeStagedPoster($saved);
+            throw $e;
+        }
+        if ($old && $old->poster_name !== $saved->poster_name) $this->removeStagedPoster($old);
+        return $saved;
+    }
+
+    public function stagedPoster(object $job): ?string
+    {
+        return $job->poster_name ? $this->posterPath($job->poster_name, false) : null;
+    }
+
     /** @return array{job:object,token:string,key:string} */
-    public function claim(object $job, int $ownerId): array
+    public function claim(object $job, int $ownerId, ?int $expectedVersion = null): array
     {
         $this->assertOwner($job, $ownerId);
+        if ($expectedVersion !== null && ((int) $job->edit_version !== $expectedVersion || $job->status !== 'pending')) throw new RuntimeException('Job changed or was claimed. Reload it before continuing.', 409);
         if (in_array((string) $job->status, ['completed', 'cancelled', 'expired'], true)) throw new RuntimeException('This encryption job is no longer claimable.');
         $crypto = new LdgCryptoService();
         $values = [];
@@ -58,7 +147,10 @@ final class ExternalEncryptionJobService
         }
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $values += ['job_token_hash' => hash('sha256', $token), 'status' => 'claimed', 'error_message' => null, 'expires_at' => gmdate('Y-m-d H:i:s', strtotime(self::LIFETIME))];
-        (new ExternalEncryptionJobModel())->update((int) $job->id, $values);
+        $values['edit_version'] = (int) $job->edit_version + 1;
+        $db = Database::connect();
+        $db->table('external_encryption_jobs')->where('id', $job->id)->where('edit_version', $job->edit_version)->where('status', $job->status)->update($values);
+        if ($db->affectedRows() !== 1) throw new RuntimeException('Job changed or was claimed. Reload it before continuing.', 409);
         return ['job' => (new ExternalEncryptionJobModel())->find((int) $job->id), 'token' => $token, 'key' => $plaintextKey];
     }
 
@@ -81,7 +173,7 @@ final class ExternalEncryptionJobService
         $processed = max(0, (int) ($payload['processed_bytes'] ?? 0));
         $total = max(0, (int) ($payload['total_bytes'] ?? 0));
         if ($total > 0 && $processed > $total) throw new RuntimeException('Processed bytes exceed the stage total.');
-        (new ExternalEncryptionJobModel())->update((int) $job->id, [
+        Database::connect()->table('external_encryption_jobs')->where('id', $job->id)->whereNotIn('status', ['completed','cancelled','expired'])->update([
             'status' => $stage, 'progress_stage' => $stage, 'processed_bytes' => $processed, 'total_bytes' => $total,
             'progress_percent' => $total > 0 ? round($processed / $total * 100, 2) : 0,
             'expires_at' => gmdate('Y-m-d H:i:s', strtotime(self::LIFETIME)),
@@ -112,6 +204,24 @@ final class ExternalEncryptionJobService
         if ($owner === null) throw new RuntimeException('The job owner no longer exists.');
         $status = (string) $owner->role === 'admin' ? 'active' : 'draft';
         $now = gmdate('Y-m-d H:i:s');
+        $posterValues = ['poster_storage_key' => null, 'poster_filename' => null, 'poster_mime_type' => null];
+        $posterProfileId = null;
+        $posterInfo = (array) ($metadata['_poster'] ?? []);
+        $posterPath = $job->poster_name ? $this->posterPath((string) $job->poster_name, false) : null;
+        if ($posterPath !== null && is_file($posterPath) && $posterInfo !== []) {
+            $posterKey = 'posters/' . (string) $job->result_public_id . '.' . (string) $posterInfo['extension'];
+            $storage = new StorageManager();
+            $profile = $storage->defaultProfile();
+            $storage->putFile($profile, $posterPath, $posterKey);
+            $posterProfileId = (int) $profile->id;
+            $posterValues = [
+                'poster_storage_key' => $posterKey,
+                'poster_filename' => (string) $posterInfo['filename'],
+                'poster_mime_type' => (string) $posterInfo['mime_type'],
+            ];
+        } elseif ($posterInfo !== []) {
+            log_message('warning', 'External encryption poster staging file is missing for job {job}.', ['job' => $job->public_id]);
+        }
         $assetValues = [
             'public_id' => (string) $job->result_public_id, 'revision' => (int) $job->revision,
             'title' => (string) ($metadata['title'] ?? pathinfo($filename, PATHINFO_FILENAME)),
@@ -119,8 +229,9 @@ final class ExternalEncryptionJobService
             'genre' => '', 'language' => $metadata['language'] ?? null, 'subtitles' => $metadata['subtitles'] ?? null,
             'age_rating' => $metadata['age_rating'] ?? null, 'production_year' => $metadata['production_year'] ?? null,
             'release_date' => $metadata['release_date'] ?? null, 'expires_on' => $metadata['expires_on'] ?? null,
-            'distributor_company' => $metadata['distributor_company'] ?? null, 'filename' => basename((string) ($payload['source_filename'] ?? $filename)),
-            'storage_key' => null, 'storage_profile_id' => null, 'delivery_mode' => 'sideload',
+            'distributor_company' => $metadata['distributor_company'] ?? null, ...$posterValues,
+            'filename' => basename((string) ($payload['source_filename'] ?? $filename)),
+            'storage_key' => null, 'storage_profile_id' => $posterProfileId, 'delivery_mode' => 'sideload',
             'mime_type' => (string) ($payload['mime_type'] ?? 'application/octet-stream'), 'size_bytes' => $outputSize,
             'sha256' => $outputHash, 'duration_ms' => $duration, 'status' => $status, 'created_by' => (int) $job->owner_user_id,
             'reviewed_by' => $status === 'active' ? (int) $job->owner_user_id : null, 'reviewed_at' => $status === 'active' ? $now : null,
@@ -149,6 +260,10 @@ final class ExternalEncryptionJobService
             ]);
             if ($db->transStatus() === false) throw new RuntimeException('The side-load transaction failed.');
             $db->transCommit();
+            if ($posterPath !== null && is_file($posterPath)) {
+                if (@unlink($posterPath)) (new ExternalEncryptionJobModel())->update((int) $job->id, ['poster_name' => null]);
+                else log_message('warning', 'Completed encryption job poster staging file could not be deleted: {path}', ['path' => $posterPath]);
+            }
             return $assetModel->find($assetId);
         } catch (Throwable $error) {
             $db->transRollback();
@@ -159,6 +274,27 @@ final class ExternalEncryptionJobService
     private function assertOwner(object $job, int $ownerId): void
     {
         if ((int) $job->owner_user_id !== $ownerId) throw new RuntimeException('This encryption job belongs to another operator.');
+    }
+
+    private function removeStagedPoster(object $job): void
+    {
+        if (! isset($job->poster_name) || ! is_string($job->poster_name) || $job->poster_name === '') return;
+        try {
+            $path = $this->posterPath($job->poster_name, false);
+            if (is_file($path) && ! @unlink($path)) log_message('warning', 'Encryption job poster staging file could not be deleted: {path}', ['path' => $path]);
+        } catch (Throwable $error) {
+            log_message('warning', 'Encryption job poster cleanup failed: {message}', ['message' => $error->getMessage()]);
+        }
+    }
+
+    private function posterPath(string $name, bool $createDirectory = true): string
+    {
+        if (! preg_match('/^[A-Za-z0-9._-]+$/', $name)) throw new RuntimeException('Poster staging filename is invalid.');
+        $directory = (new MediaWorkspaceService())->path('upload_staging');
+        if ($createDirectory && ! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
+            throw new RuntimeException('Poster staging directory could not be created.');
+        }
+        return rtrim($directory, '\\/') . DIRECTORY_SEPARATOR . $name;
     }
 
     private function uuidV4(): string

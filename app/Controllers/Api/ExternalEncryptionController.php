@@ -13,6 +13,44 @@ use Throwable;
 
 class ExternalEncryptionController extends BaseController
 {
+    public function options(): ResponseInterface
+    {
+        try {
+            $this->operator();
+            return $this->ok(['asset_types'=>\App\Libraries\AssetTaxonomyService::TYPES,
+                'genres'=>array_map(fn($g)=>['id'=>(int)$g->id,'name'=>$g->name], (new \App\Libraries\AssetTaxonomyService())->genres(true))]);
+        } catch (Throwable $e) { return $this->failure($e); }
+    }
+    public function create(): ResponseInterface { return $this->saveMetadata(null); }
+    public function updateMetadata(string $id): ResponseInterface { return $this->saveMetadata($id); }
+    private function saveMetadata(?string $id): ResponseInterface
+    {
+        try {
+            $auth = $this->operator();
+            $job = (new ExternalEncryptionJobService())->saveMetadata((int)$auth['user']->id, $this->request->getPost(), $this->request->getFile('poster'), $id);
+            return $this->ok($this->summary($job));
+        } catch (Throwable $e) { return $this->failure($e); }
+    }
+    private function owned(string $id): object
+    {
+        $auth = $this->operator(); $job = $this->find($id);
+        if ((int)$job->owner_user_id !== (int)$auth['user']->id) throw new RuntimeException('Encryption job was not found.');
+        return $job;
+    }
+    public function detail(string $id): ResponseInterface
+    {
+        try { return $this->ok($this->summary($this->owned($id))); }
+        catch (Throwable $e) { return $this->failure($e); }
+    }
+    public function poster(string $id): ResponseInterface
+    {
+        try {
+            $job = $this->owned($id); $path = (new ExternalEncryptionJobService())->stagedPoster($job);
+            if (! $path || ! is_file($path)) throw new RuntimeException('Poster was not found.');
+            $metadata = json_decode($job->metadata_json, true);
+            return $this->response->setHeader('Cache-Control','no-store')->setContentType($metadata['_poster']['mime_type'])->setBody(file_get_contents($path));
+        } catch (Throwable $e) { return $this->failure($e); }
+    }
     public function index(): ResponseInterface
     {
         try {
@@ -30,7 +68,8 @@ class ExternalEncryptionController extends BaseController
             $this->assertSecureKeyTransport();
             $auth = $this->operator();
             $job = $this->find($publicId);
-            $claimed = (new ExternalEncryptionJobService())->claim($job, (int) $auth['user']->id);
+            $body = $this->request->getJSON(true) ?? [];
+            $claimed = (new ExternalEncryptionJobService())->claim($job, (int) $auth['user']->id, isset($body['edit_version']) ? (int)$body['edit_version'] : null);
             return $this->ok([
                 'job' => $this->summary($claimed['job']), 'job_token' => $claimed['token'], 'data_key' => $claimed['key'],
                 'ldg' => ['format' => 'ldg-v1', 'header_size' => 128, 'chunk_size' => ExternalEncryptionJobService::CHUNK_SIZE],
@@ -64,8 +103,7 @@ class ExternalEncryptionController extends BaseController
         try {
             $auth = $this->operator(); $job = $this->find($publicId);
             if ((int) $job->owner_user_id !== (int) $auth['user']->id) throw new RuntimeException('This job belongs to another operator.');
-            if ((string) $job->status === 'completed') throw new RuntimeException('A completed job cannot be cancelled.');
-            (new ExternalEncryptionJobModel())->update((int) $job->id, ['status' => 'cancelled', 'job_token_hash' => null]);
+            (new ExternalEncryptionJobService())->cancel($job);
             return $this->ok(['cancelled' => true]);
         } catch (Throwable $error) { return $this->failure($error); }
     }
@@ -93,7 +131,9 @@ class ExternalEncryptionController extends BaseController
     private function summary(object $job): array
     {
         $metadata = json_decode((string) $job->metadata_json, true) ?: [];
+        $poster = $metadata['_poster'] ?? null; unset($metadata['_poster']);
         return [
+            'metadata'=>$metadata, 'poster'=>$poster, 'edit_version'=>(int)$job->edit_version,
             'id' => $job->public_id, 'asset_id' => $job->result_public_id, 'revision' => (int) $job->revision,
             'status' => $job->status, 'title' => (string) ($metadata['title'] ?? 'Untitled'),
             'stage' => $job->progress_stage, 'processed_bytes' => (int) $job->processed_bytes,
@@ -106,7 +146,7 @@ class ExternalEncryptionController extends BaseController
 
     private function failure(Throwable $error): ResponseInterface
     {
-        $status = $error instanceof OperatorAuthException ? $error->httpStatus : (str_contains(strtolower($error->getMessage()), 'not found') ? 404 : 422);
-        return $this->response->setStatusCode($status)->setJSON(['error' => ['message' => $error->getMessage()]]);
+        $status = $error instanceof OperatorAuthException ? $error->httpStatus : ($error->getCode() === 409 ? 409 : (str_contains(strtolower($error->getMessage()), 'not found') ? 404 : 422));
+        return $this->response->setStatusCode($status)->setJSON(['error' => ['message' => $error->getMessage(), 'fields'=>$error instanceof \App\Libraries\ExternalJobValidationException ? $error->fields : []]]);
     }
 }
